@@ -1,0 +1,8 @@
+[Unit]
+Description=Messenger Application Services
+Documentation=https://github.com/your-repo/messenger
+Wants=messenger-db.service messenger-redis.service messenger-api.service messenger-turn.service
+After=network.target
+
+[Install]
+WantedBy=multi-user.target

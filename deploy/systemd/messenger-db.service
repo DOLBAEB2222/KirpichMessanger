@@ -1,0 +1,40 @@
+[Unit]
+Description=Messenger PostgreSQL Database
+After=network.target
+PartOf=messenger.target
+
+[Service]
+Type=notify
+User=postgres
+Group=postgres
+WorkingDirectory=/var/lib/postgresql
+
+# Environment
+Environment="PGDATA=/var/lib/postgresql/16/main"
+EnvironmentFile=/opt/messenger/deploy/.env
+
+# Binary execution
+ExecStart=/usr/lib/postgresql/16/bin/postgres -D ${PGDATA} -c config_file=/opt/messenger/config/postgres.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10s
+
+# Resource limits
+MemoryMax=800M
+MemoryHigh=700M
+CPUQuota=60%
+
+# Timeouts
+TimeoutSec=300
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=messenger-postgres
+
+[Install]
+WantedBy=messenger.target multi-user.target

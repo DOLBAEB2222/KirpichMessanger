@@ -1,0 +1,142 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+backend/bin/
+backend/api
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+coverage.out
+
+# Go workspace file
+go.work
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+/var/log/
+
+# Data directories
+data/
+media/
+uploads/
+/var/lib/
+
+# Database dumps
+*.sql
+*.dump
+backups/
+!database/schema.sql
+
+# Docker volumes
+postgres_data/
+redis_data/
+caddy_data/
+caddy_config/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts
+dist/
+build/
+
+# Node modules (if frontend added later)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# OS specific
+Thumbs.db
+Desktop.ini
+
+# Certificates
+*.pem
+*.key
+*.crt
+*.cert
+
+# Secrets
+secrets/
+*.secret
+
+# Vendor directory
+vendor/
+
+# Go sum backup
+go.sum.bak
+
+# Editor backups
+*~
+\#*\#
+.\#*
+
+# Test coverage files
+*.coverprofile
+
+# Compiled Python files
+*.pyc
+__pycache__/
+
+# Documentation builds
+docs/_build/
+docs/.doctrees/
+
+# MacOS
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Linux
+.directory
+.Trash-*
+
+# Windows
+ehthumbs.db
+ehthumbs_vista.db
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# Caddy
+Caddyfile.local
+
+# Redis
+dump.rdb
+appendonly.aof
+
+# PostgreSQL
+*.pid
+postmaster.opts
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.circleci/
