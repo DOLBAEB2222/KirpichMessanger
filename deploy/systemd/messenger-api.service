@@ -1,0 +1,45 @@
+[Unit]
+Description=Messenger API Service
+Documentation=https://github.com/your-repo/messenger
+After=network.target messenger-db.service messenger-redis.service
+Requires=messenger-db.service messenger-redis.service
+PartOf=messenger.target
+
+[Service]
+Type=simple
+User=messenger
+Group=messenger
+WorkingDirectory=/opt/messenger/backend
+
+# Environment
+Environment="APP_ENV=production"
+Environment="APP_PORT=8080"
+EnvironmentFile=/opt/messenger/deploy/.env
+
+# Binary execution
+ExecStart=/opt/messenger/backend/bin/api
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5s
+
+# Resource limits
+MemoryMax=1G
+MemoryHigh=900M
+CPUQuota=80%
+TasksMax=1024
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/messenger/data /opt/messenger/logs
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=messenger-api
+
+[Install]
+WantedBy=messenger.target multi-user.target

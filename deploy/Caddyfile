@@ -1,0 +1,112 @@
+{
+    # Global options
+    admin off
+    persist_config off
+    auto_https off
+}
+
+# Main site configuration
+{$DOMAIN:localhost} {
+    # Enable automatic HTTPS for production
+    # tls {$EMAIL}
+
+    # Logging
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+
+    # API endpoints
+    handle /api/* {
+        reverse_proxy {$API_HOST:api:8080} {
+            # Health checks
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+
+            # Headers
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+        }
+    }
+
+    # WebSocket endpoint
+    handle /ws {
+        reverse_proxy {$API_HOST:api:8080} {
+            # WebSocket specific settings
+            header_up Upgrade {header.Upgrade}
+            header_up Connection {header.Connection}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            
+            # Keep connection alive
+            transport http {
+                read_timeout 300s
+                write_timeout 300s
+            }
+        }
+    }
+
+    # Media files (static)
+    handle /media/* {
+        root * /var/www
+        file_server {
+            precompressed gzip br
+        }
+
+        # Cache headers for media
+        @images {
+            path *.jpg *.jpeg *.png *.gif *.webp *.svg
+        }
+        header @images Cache-Control "public, max-age=31536000, immutable"
+
+        @videos {
+            path *.mp4 *.webm *.mov
+        }
+        header @videos Cache-Control "public, max-age=31536000, immutable"
+
+        @audio {
+            path *.mp3 *.ogg *.wav *.m4a
+        }
+        header @audio Cache-Control "public, max-age=31536000, immutable"
+    }
+
+    # Health check endpoint
+    handle /health {
+        respond "OK" 200
+    }
+
+    # Default response
+    handle {
+        respond "Messenger API" 200
+    }
+
+    # Response headers
+    header {
+        # Security headers
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        
+        # Remove server header
+        -Server
+    }
+
+    # Enable compression
+    encode gzip zstd
+
+    # Rate limiting (basic)
+    @ratelimit {
+        not path /health
+    }
+}
+
+# HTTP to HTTPS redirect (for production)
+# http://{$DOMAIN:localhost} {
+#     redir https://{host}{uri} permanent
+# }

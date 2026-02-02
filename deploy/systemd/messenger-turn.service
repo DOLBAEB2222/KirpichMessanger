@@ -1,0 +1,40 @@
+[Unit]
+Description=Messenger TURN Server (coturn)
+Documentation=https://github.com/coturn/coturn
+After=network.target
+PartOf=messenger.target
+
+[Service]
+Type=simple
+User=turnserver
+Group=turnserver
+WorkingDirectory=/var/lib/coturn
+
+# Environment
+EnvironmentFile=/opt/messenger/deploy/.env
+
+# Binary execution
+ExecStart=/usr/bin/turnserver -c /opt/messenger/deploy/coturn.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5s
+
+# Resource limits
+MemoryMax=200M
+MemoryHigh=180M
+CPUQuota=40%
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/coturn /var/log/coturn
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=messenger-turn
+
+[Install]
+WantedBy=messenger.target multi-user.target
