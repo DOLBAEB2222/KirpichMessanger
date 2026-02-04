@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SettingsState } from '$stores/settings';
+  import type { SettingsState } from '$lib/stores/settings';
 
   export let state: SettingsState;
 </script>

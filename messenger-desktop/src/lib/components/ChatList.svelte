@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ChatItem } from '$stores/chats';
+  import type { ChatItem } from '$lib/stores/chats';
 
   export let chats: ChatItem[] = [];
   export let activeId: string | null = null;
