@@ -15,20 +15,40 @@ A high-performance, resource-efficient messenger application built with Go, opti
 
 ### DM Features (Stage 3)
 - ✅ **Get or Create DM** - `GET /chats/dm/:user_id` endpoint for quick DM access
-- ✅ **DM Uniqueness** - Only one DM chat exists between any two users
+- ✅ **DM Uniqueness** - Only one DM chat exists between any two users (enforced via SQL constraints)
+- ✅ **DM Caching** - Redis cache for DM lookups with 5-minute TTL
 - ✅ **Auto-named Chats** - DM chats automatically named after the other user
 - ✅ **Read Receipts** - Real-time read status updates via WebSocket
 - ✅ **Typing Indicators** - Real-time typing status with 3-second debounce
 - ✅ **Online Status** - User presence tracking via WebSocket
 
+### WebSocket Features (Stage 3)
+- ✅ **Real-time Events** - Bidirectional messaging via WebSocket
+- ✅ **Typing Events** - Broadcast typing indicators to chat members
+- ✅ **Read Receipts** - Notify when messages are read
+- ✅ **Online Status** - Track and broadcast user presence
+- ✅ **Chat Presence** - Join/leave notifications
+- ✅ **Redis Pub/Sub** - Scalable message broadcasting
+- ✅ **Automatic Reconnection** - Ping/pong keep-alive mechanism
+
 ### Media Features (Stage 3)
-- ✅ **Image Compression** - Automatic resizing to 500px for mobile optimization
-- ✅ **WebP Conversion** - Images converted to WebP for smaller file sizes
-- ✅ **Thumbnail Generation** - 200x200 thumbnails for previews
-- ✅ **File Validation** - MIME type and extension validation
-- ✅ **Secure Storage** - Organized by date (`uploads/2025/02/04/`)
-- ✅ **Size Limits** - 100MB max per file (MVP)
-- ✅ **Supported Types**: JPEG, PNG, GIF, WebP, MP4, WebM, MP3, WAV
+- ✅ **Image Compression** - Automatic resizing to max 500px width
+- ✅ **Adaptive Quality** - Quality adjusts based on original file size (70-85%)
+- ✅ **Thumbnail Generation** - 200px thumbnails for image previews
+- ✅ **File Validation** - MIME type, extension, and size validation
+- ✅ **Path Traversal Protection** - Secure filename handling
+- ✅ **Organized Storage** - Date-based directory structure (`uploads/2026/01/15/`)
+- ✅ **Upload Rate Limiting** - 10 uploads per hour per user
+- ✅ **Size Limits** - 50MB max per file (MVP)
+- ✅ **Supported Types**: JPEG, PNG, GIF, WebP, MP4, WebM, MP3, WAV, PDF, ZIP, TXT
+- ✅ **Media Cleanup** - Automatic removal of files older than 30 days
+
+### Chat List Optimization (Stage 3)
+- ✅ **Last Message Loading** - Chats include most recent message
+- ✅ **Unread Counts** - Real-time unread message counts per chat
+- ✅ **Redis Caching** - 5-minute cache for chat lists
+- ✅ **Cache Invalidation** - Automatic invalidation on new messages
+- ✅ **Efficient Queries** - Optimized SQL with proper indexing
 
 ### Premium Features
 - Higher upload limits (500MB vs 50MB)
