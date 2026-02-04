@@ -864,6 +864,219 @@ ws.onclose = () => {
 }
 ```
 
+**Call Initiated:**
+```json
+{
+  "type": "call:initiate",
+  "call": {
+    "id": "770e8400-e29b-41d4-a716-446655440000",
+    "chat_id": "550e8400-e29b-41d4-a716-446655440001",
+    "initiator_id": "550e8400-e29b-41d4-a716-446655440000",
+    "recipient_id": "550e8400-e29b-41d4-a716-446655440001",
+    "type": "voice",
+    "status": "ringing",
+    "created_at": "2026-02-02T17:00:00Z"
+  },
+  "initiator": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "username": "john_doe"
+  }
+}
+```
+
+**Call Accepted/Rejected:**
+```json
+{
+  "type": "call:accepted",
+  "call": {
+    "id": "770e8400-e29b-41d4-a716-446655440000",
+    "status": "accepted",
+    "started_at": "2026-02-02T17:00:05Z"
+  }
+}
+```
+
+**Call Ended:**
+```json
+{
+  "type": "call:ended",
+  "call": {
+    "id": "770e8400-e29b-41d4-a716-446655440000",
+    "status": "ended",
+    "duration": 125,
+    "ended_at": "2026-02-02T17:02:10Z"
+  },
+  "ended_by": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**WebRTC Signaling:**
+```json
+{
+  "type": "call:webrtc:offer",
+  "data": {
+    "call_id": "770e8400-e29b-41d4-a716-446655440000",
+    "offer": {
+      "type": "offer",
+      "sdp": "v=0\r\no=- 12345..."
+    }
+  }
+}
+```
+
+---
+
+### Calls
+
+#### POST /calls
+
+Initiate a voice or video call.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8080/api/v1/calls \
+  -H "Authorization: Bearer <jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chat_id": "550e8400-e29b-41d4-a716-446655440001",
+    "recipient_id": "550e8400-e29b-41d4-a716-446655440002",
+    "call_type": "voice"
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "id": "770e8400-e29b-41d4-a716-446655440000",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440001",
+  "initiator_id": "550e8400-e29b-41d4-a716-446655440000",
+  "recipient_id": "550e8400-e29b-41d4-a716-446655440002",
+  "type": "voice",
+  "status": "ringing",
+  "created_at": "2026-02-02T17:00:00Z"
+}
+```
+
+**Errors:**
+- 400: Invalid chat_id or recipient_id
+- 403: Not a member of the chat
+- 409: Active call already exists
+
+---
+
+#### GET /calls/:call_id
+
+Get call details.
+
+**Request:**
+```bash
+curl -X GET http://localhost:8080/api/v1/calls/770e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer <jwt_token>"
+```
+
+**Response (200):**
+```json
+{
+  "id": "770e8400-e29b-41d4-a716-446655440000",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440001",
+  "initiator_id": "550e8400-e29b-41d4-a716-446655440000",
+  "recipient_id": "550e8400-e29b-41d4-a716-446655440002",
+  "type": "voice",
+  "status": "accepted",
+  "duration": 0,
+  "started_at": "2026-02-02T17:00:05Z",
+  "created_at": "2026-02-02T17:00:00Z"
+}
+```
+
+---
+
+#### PATCH /calls/:call_id
+
+Accept or reject an incoming call.
+
+**Request (Accept):**
+```bash
+curl -X PATCH http://localhost:8080/api/v1/calls/770e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer <jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "accept": true
+  }'
+```
+
+**Request (Reject):**
+```bash
+curl -X PATCH http://localhost:8080/api/v1/calls/770e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer <jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "accept": false
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "id": "770e8400-e29b-41d4-a716-446655440000",
+  "status": "accepted",
+  "started_at": "2026-02-02T17:00:05Z"
+}
+```
+
+---
+
+#### DELETE /calls/:call_id
+
+End an active call.
+
+**Request:**
+```bash
+curl -X DELETE http://localhost:8080/api/v1/calls/770e8400-e29b-41d4-a716-446655440000 \
+  -H "Authorization: Bearer <jwt_token>"
+```
+
+**Response (200):**
+```json
+{
+  "id": "770e8400-e29b-41d4-a716-446655440000",
+  "status": "ended",
+  "duration": 125,
+  "ended_at": "2026-02-02T17:02:10Z"
+}
+```
+
+---
+
+#### GET /calls/ice-servers
+
+Get TURN/STUN server configuration for WebRTC.
+
+**Request:**
+```bash
+curl -X GET http://localhost:8080/api/v1/calls/ice-servers \
+  -H "Authorization: Bearer <jwt_token>"
+```
+
+**Response (200):**
+```json
+{
+  "iceServers": [
+    {
+      "urls": ["turn:turn.example.com:3478?transport=udp"],
+      "username": "user",
+      "credential": "password"
+    },
+    {
+      "urls": ["stun:stun.example.com:3478"]
+    },
+    {
+      "urls": ["stun:stun.l.google.com:19302"]
+    }
+  ]
+}
+```
+
 ---
 
 ## Postman Collection

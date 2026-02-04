@@ -22,7 +22,7 @@ A high-performance, resource-efficient messenger application built with Go, opti
 - ✅ **Typing Indicators** - Real-time typing status with 3-second debounce
 - ✅ **Online Status** - User presence tracking via WebSocket
 
-### WebSocket Features (Stage 3)
+### WebSocket Features (Stage 3-4)
 - ✅ **Real-time Events** - Bidirectional messaging via WebSocket
 - ✅ **Typing Events** - Broadcast typing indicators to chat members
 - ✅ **Read Receipts** - Notify when messages are read
@@ -30,6 +30,7 @@ A high-performance, resource-efficient messenger application built with Go, opti
 - ✅ **Chat Presence** - Join/leave notifications
 - ✅ **Redis Pub/Sub** - Scalable message broadcasting
 - ✅ **Automatic Reconnection** - Ping/pong keep-alive mechanism
+- ✅ **WebRTC Signaling** - offer/answer/ice candidate exchange for calls
 
 ### Media Features (Stage 3)
 - ✅ **Image Compression** - Automatic resizing to max 500px width
@@ -57,9 +58,14 @@ A high-performance, resource-efficient messenger application built with Go, opti
 - Custom themes (future)
 - Advanced features (future)
 
+### Voice & Video Calls (Stage 4)
+- ✅ **Call Initiation** - `POST /api/v1/calls` to start voice/video calls
+- ✅ **Call Signaling** - WebRTC signaling via WebSocket
+- ✅ **ICE Servers** - TURN/STUN server configuration endpoint
+- ✅ **Call Management** - Accept, reject, and end calls via REST API
+- ✅ **Call History** - Persistent call records with duration
+
 ### Upcoming Features
-- 🔜 **Voice Calls** - WebRTC-based voice communication
-- 🔜 **Video Calls** - High-quality video calling
 - 🔜 **E2E Encryption** - End-to-end encryption (Stage 3-4)
 - 🔜 **Real Payment Integration** - Stripe/Yookassa (Stage 2)
 
@@ -330,6 +336,18 @@ WS /ws?token=<jwt_token>
 
 // Join chat for presence
 { "type": "join_chat", "chat_id": "uuid" }
+
+// WebRTC Offer (call signaling)
+{ "type": "call:webrtc:offer", "data": { "call_id": "uuid", "offer": { ... } } }
+
+// WebRTC Answer
+{ "type": "call:webrtc:answer", "data": { "call_id": "uuid", "answer": { ... } } }
+
+// ICE Candidate
+{ "type": "call:webrtc:candidate", "data": { "call_id": "uuid", "candidate": { ... } } }
+
+// Hang up
+{ "type": "call:hangup", "data": { "call_id": "uuid" } }
 ```
 
 **Server → Client:**
@@ -345,6 +363,16 @@ WS /ws?token=<jwt_token>
 
 // Online status
 { "type": "online_status", "user_id": "uuid", "is_online": true }
+
+// Call initiated
+{ "type": "call:initiate", "call": { ... }, "initiator": { ... } }
+
+// Call accepted/rejected
+{ "type": "call:accepted", "call": { ... } }
+{ "type": "call:rejected", "call": { ... } }
+
+// Call ended
+{ "type": "call:ended", "call": { ... }, "ended_by": "uuid" }
 ```
 
 See [TDD.md](docs/TDD.md) for complete API documentation.
