@@ -1,6 +1,6 @@
 # Telegram Clone - Optimized Messenger
 
-A high-performance, resource-efficient messenger application built with Go, optimized for low-end hardware while maintaining scalability for 500+ users.
+A high-performance, resource-efficient messenger application built with Go, optimized for low-end hardware (i3-2120, 4GB RAM) while maintaining scalability for 500+ users with unique features: Wiki, Code Snippets, Temporary Roles, and RSS Aggregator.
 
 ## 🚀 Features
 
@@ -12,6 +12,12 @@ A high-performance, resource-efficient messenger application built with Go, opti
 - ✅ **Real-time Messaging** - WebSocket-based instant messaging with Redis pub/sub
 - ✅ **Media Sharing** - Image, video, audio, and file uploads with compression
 - ✅ **Premium Subscriptions** - Tiered subscription system
+
+### Unique Features (New)
+- ✅ **Wiki in Channels** - Create and manage documentation pages within channels with hierarchical structure
+- ✅ **Code Snippets** - Mini code editor with syntax highlighting for sharing code in chats
+- ✅ **Temporary Roles** - Time-limited role assignments with custom permissions for chats and channels
+- ✅ **RSS Aggregator** - Subscribe to RSS feeds and get updates automatically posted to channels
 
 ### DM Features (Stage 3)
 - ✅ **Get or Create DM** - `GET /chats/dm/:user_id` endpoint for quick DM access
@@ -121,14 +127,15 @@ Messages are currently stored in plaintext in the database. End-to-end encryptio
 - **Storage:** 100GB+ SSD
 - **Network:** 100 Mbps+
 
-### Resource Allocation
-| Service    | Memory Limit | Purpose                       |
-|------------|--------------|-------------------------------|
-| PostgreSQL | 800MB        | Primary database              |
-| Redis      | 300MB        | Cache & pub/sub               |
-| Go API     | 1GB          | REST API & WebSocket          |
-| Caddy      | 200MB        | Reverse proxy & HTTPS         |
-| coturn     | 200MB        | TURN server for WebRTC        |
+### Resource Allocation (Optimized for i3-2120, 4GB RAM)
+| Service    | Memory Limit | CPU Limit | Purpose                       |
+|------------|--------------|-----------|-------------------------------|
+| PostgreSQL | 700MB        | 1.0 core  | Primary database              |
+| Redis      | 250MB        | 0.5 core  | Cache & pub/sub               |
+| Go API     | 900MB        | 1.5 cores | REST API & WebSocket          |
+| Caddy      | 150MB        | 0.5 core  | Reverse proxy & HTTPS         |
+| coturn     | 150MB        | 0.5 core  | TURN server for WebRTC        |
+| **Total**  | **~2.15GB**  | **~4.0 cores** | **~54% of system RAM**  |
 
 ## 🚀 Quick Start
 
@@ -144,6 +151,21 @@ The script will:
 3. Configure firewall
 4. Generate environment files with secure secrets
 5. Start all services
+
+### Setup Scripts
+
+After cloning the repository, you can use the following scripts:
+
+```bash
+# Run database migration
+./scripts/migrate.sh
+
+# Check system health
+./scripts/health-check.sh
+
+# Start all services
+cd deploy && docker compose up -d
+```
 
 ### Manual Setup
 
@@ -375,6 +397,134 @@ WS /ws?token=<jwt_token>
 { "type": "call:ended", "call": { ... }, "ended_by": "uuid" }
 ```
 
+### Wiki in Channels
+
+#### Create Wiki Page
+```http
+POST /api/v1/wiki
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "channel_id": "uuid",
+  "slug": "getting-started",
+  "title": "Getting Started Guide",
+  "content": "## Welcome\n\nThis is the wiki page content...",
+  "parent_id": "uuid",
+  "is_published": true,
+  "order": 1
+}
+```
+
+#### Get Wiki Page
+```http
+GET /api/v1/wiki/:channelId/:slug
+Authorization: Bearer <token>
+```
+
+#### List Wiki Pages
+```http
+GET /api/v1/wiki/:channelId
+Authorization: Bearer <token>
+```
+
+#### Get Wiki Tree
+```http
+GET /api/v1/wiki/:channelId/tree
+Authorization: Bearer <token>
+```
+
+### Code Snippets
+
+#### Create Code Snippet
+```http
+POST /api/v1/code
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "message_id": "uuid",
+  "chat_id": "uuid",
+  "language": "javascript",
+  "code": "console.log('Hello, World!');",
+  "file_name": "example.js"
+}
+```
+
+#### Get Code Snippet
+```http
+GET /api/v1/code/:id
+Authorization: Bearer <token>
+```
+
+#### List Code Snippets by Chat
+```http
+GET /api/v1/code/chat/:chatId?language=python
+Authorization: Bearer <token>
+```
+
+### Temporary Roles
+
+#### Grant Temporary Role
+```http
+POST /api/v1/temp-roles
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "target_id": "uuid",
+  "target_type": "channel",
+  "user_id": "uuid",
+  "role_type": "moderator",
+  "permissions": ["edit_messages", "delete_messages"],
+  "duration_hours": 24
+}
+```
+
+#### List User Roles
+```http
+GET /api/v1/temp-roles/user/:userId
+Authorization: Bearer <token>
+```
+
+#### Check Permission
+```http
+GET /api/v1/temp-roles/check/:userId/:targetId?target_type=channel&permission=edit_messages
+Authorization: Bearer <token>
+```
+
+### RSS Aggregator
+
+#### Add RSS Feed
+```http
+POST /api/v1/rss
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "channel_id": "uuid",
+  "url": "https://example.com/feed.xml"
+}
+```
+
+#### List RSS Feeds
+```http
+GET /api/v1/rss
+Authorization: Bearer <token>
+```
+
+#### Get RSS Feed Items
+```http
+GET /api/v1/rss/:id/items?limit=20&offset=0
+Authorization: Bearer <token>
+```
+
+#### Refresh RSS Feed
+```http
+POST /api/v1/rss/:id/refresh
+Authorization: Bearer <token>
+```
+
 See [TDD.md](docs/TDD.md) for complete API documentation.
 
 ## 🛠️ Development
@@ -473,6 +623,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 ## 📅 Roadmap
 
 See [ROADMAP.md](docs/ROADMAP.md) for detailed development stages.
+
+## 📚 Documentation
+
+- [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) - Detailed deployment instructions
+- [Features Documentation](docs/FEATURES.md) - Detailed documentation of unique features
+- [Upgrade Guide](docs/UPGRADE.md) - Upgrading from v1 to v2
+- [TDD.md](docs/TDD.md) - Complete API documentation and technical details
 
 **Quick Overview:**
 - **Stage 1 (MVP):** Core messaging, stub payments ✅
