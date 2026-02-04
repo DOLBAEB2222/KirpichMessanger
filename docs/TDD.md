@@ -121,10 +121,19 @@ This messenger application is designed as a scalable Telegram clone with a focus
 - **Transport:** HTTPS via Caddy (Let's Encrypt)
 - **Password Hashing:** bcrypt (cost=12, minimum 12 rounds)
 - **Password Validation:** Minimum 8 chars, requires uppercase, lowercase, and digit
-- **Rate Limiting:** 5 login attempts per 15 minutes per phone/email
+- **Rate Limiting:** 
+  - Login: 5 attempts per 15 minutes per phone/email
+  - Upload: 10 uploads per hour per user
 - **SQL Injection Protection:** GORM parameterized queries
 - **CORS:** Configurable origins via environment variables
 - **E2E Encryption:** Planned for stage 3-4 (Signal Protocol or similar)
+
+### Media Upload Security
+- **File Validation:** MIME type, extension, size checks (max 50MB)
+- **Path Traversal Protection:** Filename sanitization, no `..` allowed
+- **Image Processing:** Compression to max 500px width, thumbnail generation
+- **Storage:** Organized by date `/uploads/{year}/{month}/{day}/{file}`
+- **Cleanup:** Automatic removal of files older than 30 days
 
 ---
 
@@ -1150,6 +1159,151 @@ k6 run --vus 50 --duration 5m load-test.js
 
 ---
 
+## WebSocket Events
+
+### Connection
+```
+ws://localhost:8080/ws?token=<jwt_token>
+```
+
+### Client → Server Events
+
+#### Send Message
+```json
+{
+  "type": "message",
+  "chat_id": "uuid",
+  "content": "Hello!"
+}
+```
+
+#### Typing Indicator
+```json
+{
+  "type": "typing",
+  "chat_id": "uuid"
+}
+```
+*Auto-clears after 3 seconds of inactivity*
+
+#### Read Receipt
+```json
+{
+  "type": "read",
+  "chat_id": "uuid"
+}
+```
+
+#### Join/Leave Chat
+```json
+{
+  "type": "join_chat",
+  "chat_id": "uuid"
+}
+```
+
+### Server → Client Events
+
+#### New Message
+```json
+{
+  "type": "new_message",
+  "message": {
+    "id": "uuid",
+    "sender_id": "uuid",
+    "chat_id": "uuid",
+    "content": "Hello!",
+    "message_type": "text",
+    "created_at": "2024-01-15T10:00:00Z"
+  }
+}
+```
+
+#### Typing Indicator
+```json
+{
+  "type": "typing",
+  "chat_id": "uuid",
+  "user_id": "uuid",
+  "is_typing": true,
+  "timestamp": 1705312800
+}
+```
+
+#### Read Receipt
+```json
+{
+  "type": "read",
+  "chat_id": "uuid",
+  "user_id": "uuid",
+  "last_read_at": "2024-01-15T10:00:00Z",
+  "unread_count": 0
+}
+```
+
+#### Online Status
+```json
+{
+  "type": "online_status",
+  "user_id": "uuid",
+  "is_online": true,
+  "timestamp": 1705312800
+}
+```
+*Broadcast to chat members when user connects/disconnects*
+
+---
+
+## Database Optimizations
+
+### DM Chat Optimization
+- **Unique Constraint:** Only one DM allowed per user pair
+- **Cache Key:** `chat:dm:{user1_id}:{user2_id}` (sorted UUIDs)
+- **Cache TTL:** 5 minutes
+- **Query Pattern:** Direct SQL with JOINs for performance
+
+### User Chats List
+- **Cache Key:** `user:chats:{user_id}`
+- **Cache TTL:** 5 minutes
+- **Includes:** Last message, unread count per chat
+- **Invalidation:** On new message, member add/remove
+
+### Message Pagination
+- **Default Limit:** 50 messages
+- **Max Limit:** 100 messages
+- **Index:** `idx_messages_chat_created` on (chat_id, created_at)
+
+---
+
+## Media Processing
+
+### Image Compression
+- **Max Width:** 500px
+- **Thumbnail Size:** 200px
+- **Quality:** Adaptive based on original size
+  - >10MB: 70%
+  - >5MB: 75%
+  - >1MB: 80%
+  - <1MB: 85%
+- **Format:** JPEG for photos, PNG for graphics
+
+### File Storage
+```
+uploads/
+├── 2026/
+│   ├── 01/
+│   │   ├── 15/
+│   │   │   ├── image_abc123.jpg
+│   │   │   └── thumb_image_abc123.jpg
+```
+
+### Cleanup Policy
+- **Retention:** 30 days for unused files
+- **Schedule:** Daily cron job via `make cleanup-media`
+- **Dry Run:** Supported for testing
+
+---
+
 **Document Version:** 1.0.0  
-**Last Updated:** 2024-01-15  
-**Next Review:** After MVP deployment
+**Last Updated:** 2024-02-04  
+**Next Review:** After Stage 3 completion

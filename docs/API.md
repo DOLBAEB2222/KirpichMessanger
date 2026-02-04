@@ -416,6 +416,301 @@ curl -X POST http://localhost:8080/api/v1/auth/logout \
 
 ---
 
+### Messages
+
+#### POST /messages
+
+Send a text message to a chat.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8080/api/v1/messages \
+  -H "Authorization: Bearer <jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chat_id": "550e8400-e29b-41d4-a716-446655440000",
+    "content": "Hello, world!",
+    "message_type": "text",
+    "reply_to_id": "optional-message-id"
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "id": "660e8400-e29b-41d4-a716-446655440001",
+  "sender_id": "550e8400-e29b-41d4-a716-446655440000",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440001",
+  "content": "Hello, world!",
+  "message_type": "text",
+  "is_edited": false,
+  "created_at": "2026-02-02T17:00:00Z",
+  "sender": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "username": "john_doe"
+  }
+}
+```
+
+---
+
+#### POST /messages/upload
+
+Upload media (image, video, audio, file) to a chat.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8080/api/v1/messages/upload \
+  -H "Authorization: Bearer <jwt_token>" \
+  -F "chat_id=550e8400-e29b-41d4-a716-446655440000" \
+  -F "content=Optional caption" \
+  -F "file=@/path/to/image.jpg"
+```
+
+**Response (201):**
+```json
+{
+  "message": {
+    "id": "660e8400-e29b-41d4-a716-446655440002",
+    "sender_id": "550e8400-e29b-41d4-a716-446655440000",
+    "chat_id": "550e8400-e29b-41d4-a716-446655440001",
+    "content": "image.jpg",
+    "message_type": "image",
+    "media_url": "2026/01/15/image_abc123.jpg",
+    "created_at": "2026-02-02T17:00:00Z"
+  },
+  "media": {
+    "file_path": "2026/01/15/image_abc123.jpg",
+    "file_size": 204800,
+    "mime_type": "image/jpeg",
+    "width": 800,
+    "height": 600,
+    "thumbnail": "2026/01/15/thumb_image_abc123.jpg",
+    "compressed": true
+  }
+}
+```
+
+**Supported File Types:**
+- Images: jpeg, jpg, png, gif, webp (max 50MB)
+- Videos: mp4, webm, ogg (max 50MB)
+- Audio: mp3, wav, ogg, webm (max 50MB)
+- Files: pdf, zip, txt (max 50MB)
+
+**Rate Limiting:** Max 10 uploads per hour per user.
+
+---
+
+#### GET /messages/:id
+
+Get a specific message by ID.
+
+**Request:**
+```bash
+curl -X GET http://localhost:8080/api/v1/messages/660e8400-e29b-41d4-a716-446655440001 \
+  -H "Authorization: Bearer <jwt_token>"
+```
+
+**Response (200):**
+```json
+{
+  "id": "660e8400-e29b-41d4-a716-446655440001",
+  "sender_id": "550e8400-e29b-41d4-a716-446655440000",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440001",
+  "content": "Hello, world!",
+  "message_type": "text",
+  "is_edited": false,
+  "created_at": "2026-02-02T17:00:00Z",
+  "sender": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "username": "john_doe"
+  }
+}
+```
+
+---
+
+#### PATCH /messages/:id
+
+Edit a message (only sender can edit).
+
+**Request:**
+```bash
+curl -X PATCH http://localhost:8080/api/v1/messages/660e8400-e29b-41d4-a716-446655440001 \
+  -H "Authorization: Bearer <jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Updated message content"
+  }'
+```
+
+**Response (200):** Updated message object
+
+---
+
+#### DELETE /messages/:id
+
+Delete a message (soft delete, only sender can delete).
+
+**Request:**
+```bash
+curl -X DELETE http://localhost:8080/api/v1/messages/660e8400-e29b-41d4-a716-446655440001 \
+  -H "Authorization: Bearer <jwt_token>"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Message deleted successfully"
+}
+```
+
+---
+
+### Chats
+
+#### GET /chats
+
+Get all chats for the current user with last messages and unread counts.
+
+**Request:**
+```bash
+curl -X GET http://localhost:8080/api/v1/chats \
+  -H "Authorization: Bearer <jwt_token>"
+```
+
+**Response (200):**
+```json
+{
+  "chats": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "name": "John Doe",
+      "type": "dm",
+      "member_count": 2,
+      "last_message_at": "2026-02-02T17:00:00Z",
+      "last_message": {
+        "id": "660e8400-e29b-41d4-a716-446655440001",
+        "content": "Hello!",
+        "message_type": "text",
+        "sender": {
+          "id": "550e8400-e29b-41d4-a716-446655440000",
+          "username": "john_doe"
+        }
+      },
+      "unread_count": 3
+    }
+  ],
+  "count": 1
+}
+```
+
+**Caching:** Results are cached for 5 minutes and invalidated on new messages.
+
+---
+
+#### POST /chats
+
+Create a new chat (group) or get existing DM.
+
+**Request (Group):**
+```bash
+curl -X POST http://localhost:8080/api/v1/chats \
+  -H "Authorization: Bearer <jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Project Team",
+    "type": "group",
+    "member_ids": ["user-id-1", "user-id-2"]
+  }'
+```
+
+**Request (DM):**
+```bash
+curl -X POST http://localhost:8080/api/v1/chats \
+  -H "Authorization: Bearer <jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "dm",
+    "member_ids": ["user-id-1"]
+  }'
+```
+
+**Response (201):** Chat object
+
+---
+
+#### GET /chats/dm/:user_id
+
+Get or create a DM chat with a specific user.
+
+**Request:**
+```bash
+curl -X GET http://localhost:8080/api/v1/chats/dm/550e8400-e29b-41d4-a716-446655440002 \
+  -H "Authorization: Bearer <jwt_token>"
+```
+
+**Response (200):** Chat object (existing or newly created)
+
+---
+
+#### GET /chats/:id
+
+Get a specific chat by ID.
+
+**Request:**
+```bash
+curl -X GET http://localhost:8080/api/v1/chats/550e8400-e29b-41d4-a716-446655440001 \
+  -H "Authorization: Bearer <jwt_token>"
+```
+
+**Response (200):** Chat object with members
+
+---
+
+#### GET /chats/:id/messages
+
+Get messages from a chat with pagination.
+
+**Request:**
+```bash
+curl -X GET "http://localhost:8080/api/v1/chats/550e8400-e29b-41d4-a716-446655440001/messages?limit=50&offset=0" \
+  -H "Authorization: Bearer <jwt_token>"
+```
+
+**Response (200):**
+```json
+{
+  "messages": [...],
+  "total": 100,
+  "limit": 50,
+  "offset": 0,
+  "has_more": true
+}
+```
+
+---
+
+#### POST /chats/:id/read
+
+Mark all messages in a chat as read.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8080/api/v1/chats/550e8400-e29b-41d4-a716-446655440001/read \
+  -H "Authorization: Bearer <jwt_token>"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Marked as read",
+  "unread_count": 0
+}
+```
+
+---
+
 ## WebSocket Connection
 
 For real-time messaging, connect to WebSocket endpoint:
@@ -439,6 +734,134 @@ ws.onerror = (error) => {
 ws.onclose = () => {
   console.log('Disconnected from WebSocket');
 };
+```
+
+### WebSocket Event Types
+
+#### Client → Server
+
+**Send Message:**
+```json
+{
+  "type": "message",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440001",
+  "content": "Hello via WebSocket!"
+}
+```
+
+**Typing Indicator:**
+```json
+{
+  "type": "typing",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+**Read Receipt:**
+```json
+{
+  "type": "read",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+**Join Chat:**
+```json
+{
+  "type": "join_chat",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+**Leave Chat:**
+```json
+{
+  "type": "leave_chat",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+**Ping (keep-alive):**
+```json
+{
+  "type": "ping"
+}
+```
+
+#### Server → Client
+
+**New Message:**
+```json
+{
+  "type": "new_message",
+  "message": {
+    "id": "660e8400-e29b-41d4-a716-446655440001",
+    "sender_id": "550e8400-e29b-41d4-a716-446655440000",
+    "chat_id": "550e8400-e29b-41d4-a716-446655440001",
+    "content": "Hello!",
+    "message_type": "text",
+    "created_at": "2026-02-02T17:00:00Z"
+  }
+}
+```
+
+**Typing Indicator:**
+```json
+{
+  "type": "typing",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440001",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "is_typing": true,
+  "timestamp": 1738515600
+}
+```
+
+**Read Receipt:**
+```json
+{
+  "type": "read",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440001",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "last_read_at": "2026-02-02T17:00:00Z",
+  "unread_count": 0,
+  "message_id": "660e8400-e29b-41d4-a716-446655440001"
+}
+```
+
+**Online Status:**
+```json
+{
+  "type": "online_status",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "is_online": true,
+  "timestamp": 1738515600
+}
+```
+
+**Chat Presence:**
+```json
+{
+  "type": "chat_presence",
+  "chat_id": "550e8400-e29b-41d4-a716-446655440001",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "is_joined": true
+}
+```
+
+**Pong (ping response):**
+```json
+{
+  "type": "pong",
+  "timestamp": 1738515600
+}
+```
+
+**User Chats (sent on connect):**
+```json
+{
+  "type": "user_chats",
+  "chat_ids": ["chat-id-1", "chat-id-2"]
+}
 ```
 
 ---
