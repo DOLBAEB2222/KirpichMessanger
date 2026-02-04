@@ -48,8 +48,7 @@ fn main() {
             commands::login,
             commands::send_message,
             commands::upload_media,
-            commands::get_chats,
-            commands::handle_notifications
+            commands::get_chats
         ])
         .setup(|app| {
             window::create_main_window(app)?;

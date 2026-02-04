@@ -1,74 +1,103 @@
 {
   "build": {
-    "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
     "devPath": "http://localhost:5173",
-    "distDir": "../build"
+    "distDir": "../build",
+    "withGlobalTauri": false
   },
   "package": {
-    "productName": "KirpichMessanger",
+    "productName": "KirpichMessenger",
     "version": "0.1.0"
   },
   "tauri": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "KirpichMessanger",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 960,
-        "minHeight": 640,
-        "resizable": true,
-        "fullscreen": false
-      }
-    ],
-    "security": {
-      "csp": "default-src 'self' tauri: http://localhost:5173; connect-src https: wss:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
-    },
-    "systemTray": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": true
-    },
-    "updater": {
-      "active": true,
-      "dialog": true,
-      "pubkey": ""
-    },
     "allowlist": {
       "all": false,
-      "fs": {
+      "shell": {
         "all": false,
-        "readFile": true,
-        "writeFile": true
+        "open": true
       },
-      "http": {
+      "window": {
         "all": false,
-        "request": true,
-        "scope": [
-          "https://api.kirpich.app/*"
-        ]
+        "close": true,
+        "hide": true,
+        "show": true,
+        "maximize": true,
+        "minimize": true,
+        "unmaximize": true,
+        "unminimize": true,
+        "startDragging": true
       },
       "notification": {
         "all": true
       },
-      "shell": {
-        "all": false
+      "fs": {
+        "all": true,
+        "readFile": true,
+        "writeFile": true,
+        "readDir": true,
+        "copyFile": true,
+        "createDir": true,
+        "removeDir": true,
+        "removeFile": true,
+        "renameFile": true,
+        "exists": true
       },
-      "window": {
-        "all": true
+      "http": {
+        "all": true,
+        "request": true
       }
     },
     "bundle": {
       "active": true,
       "targets": "all",
-      "identifier": "com.kirpich.messenger",
+      "category": "SocialNetworking",
+      "copyright": "",
+      "deb": {
+        "depends": []
+      },
+      "externalBin": [],
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",
         "icons/128x128@2x.png",
         "icons/icon.icns",
         "icons/icon.ico"
-      ]
-    }
+      ],
+      "identifier": "com.messenger.desktop",
+      "longDescription": "KirpichMessenger Desktop",
+      "macos": {
+        "entitlements": null,
+        "exceptionDomain": "",
+        "frameworks": [],
+        "providerShortName": null,
+        "signingIdentity": null
+      },
+      "resources": [],
+      "shortDescription": "KirpichMessenger Desktop Client",
+      "targets": "all",
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampUrl": ""
+      }
+    },
+    "security": {
+      "csp": null
+    },
+    "updater": {
+      "active": false
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "resizable": true,
+        "title": "KirpichMessenger",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600
+      }
+    ]
   }
 }
