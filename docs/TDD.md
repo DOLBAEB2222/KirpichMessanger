@@ -115,8 +115,15 @@ This messenger application is designed as a scalable Telegram clone with a focus
 
 ### Security
 - **Authentication:** JWT (HS256)
+  - Access token: 1 hour expiration
+  - Refresh token: 30 days expiration
+  - Secret keys from environment variables
 - **Transport:** HTTPS via Caddy (Let's Encrypt)
-- **Password Hashing:** bcrypt (cost=12)
+- **Password Hashing:** bcrypt (cost=12, minimum 12 rounds)
+- **Password Validation:** Minimum 8 chars, requires uppercase, lowercase, and digit
+- **Rate Limiting:** 5 login attempts per 15 minutes per phone/email
+- **SQL Injection Protection:** GORM parameterized queries
+- **CORS:** Configurable origins via environment variables
 - **E2E Encryption:** Planned for stage 3-4 (Signal Protocol or similar)
 
 ---
@@ -146,13 +153,10 @@ Request:
 
 Response (201):
 {
-  "user": {
-    "id": "uuid",
-    "phone": "+1234567890",
-    "username": "johndoe",
-    "created_at": "2024-01-15T10:00:00Z"
-  },
-  "token": "eyJhbGciOiJIUzI1NiIs..."
+  "user_id": "uuid",
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+  "expires_in": 3600
 }
 ```
 
@@ -163,18 +167,133 @@ Content-Type: application/json
 
 Request:
 {
-  "phone": "+1234567890",
+  "phone_or_email": "+1234567890",
   "password": "SecurePass123!"
 }
 
 Response (200):
 {
-  "user": {
-    "id": "uuid",
-    "username": "johndoe",
-    "is_premium": false
-  },
-  "token": "eyJhbGciOiJIUzI1NiIs..."
+  "user_id": "uuid",
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+  "expires_in": 3600
+}
+```
+
+#### 3. Refresh Token
+```http
+POST /auth/refresh
+Content-Type: application/json
+
+Request:
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs..."
+}
+
+Response (200):
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "expires_in": 3600
+}
+```
+
+#### 4. Logout
+```http
+POST /auth/logout
+Authorization: Bearer <token>
+
+Response (200):
+{
+  "message": "Logged out successfully"
+}
+```
+
+### User Profile Endpoints
+
+#### 5. Get Current User Profile
+```http
+GET /users/me
+Authorization: Bearer <token>
+
+Response (200):
+{
+  "id": "uuid",
+  "phone": "+1234567890",
+  "email": "user@example.com",
+  "username": "johndoe",
+  "avatar_url": "https://...",
+  "bio": "Hello, I'm using Messenger!",
+  "created_at": "2024-01-15T10:00:00Z",
+  "is_premium": false,
+  "last_seen": "2024-01-15T17:00:00Z"
+}
+```
+
+#### 6. Get Public User Profile
+```http
+GET /users/:user_id
+Authorization: Bearer <token>
+
+Response (200):
+{
+  "id": "uuid",
+  "username": "johndoe",
+  "avatar_url": "https://...",
+  "bio": "Hello, I'm using Messenger!",
+  "is_premium": false,
+  "last_seen": "2024-01-15T17:00:00Z"
+}
+```
+
+#### 7. Update Profile
+```http
+PATCH /users/me
+Authorization: Bearer <token>
+Content-Type: application/json
+
+Request:
+{
+  "username": "new_username",
+  "bio": "New bio",
+  "avatar": "base64_or_url"
+}
+
+Response (200):
+{
+  "id": "uuid",
+  "username": "new_username",
+  "bio": "New bio",
+  "avatar_url": "https://...",
+  "updated_at": "2024-01-15T18:00:00Z"
+}
+```
+
+#### 8. Change Password
+```http
+PATCH /users/me/password
+Authorization: Bearer <token>
+Content-Type: application/json
+
+Request:
+{
+  "old_password": "currentpassword",
+  "new_password": "newpassword"
+}
+
+Response (200):
+{
+  "message": "Password changed successfully"
+}
+```
+
+#### 9. Delete Account (Soft Delete)
+```http
+DELETE /users/me
+Authorization: Bearer <token>
+
+Response (200):
+{
+  "message": "Account deleted successfully"
 }
 ```
 
@@ -372,8 +491,10 @@ users (1) ──────< (N) payment_logs
 - avatar_url: TEXT
 - bio: TEXT
 - is_premium: BOOLEAN DEFAULT FALSE
+- last_seen_at: TIMESTAMP (indexed)
 - created_at: TIMESTAMP DEFAULT NOW()
 - updated_at: TIMESTAMP DEFAULT NOW()
+- deleted_at: TIMESTAMP (soft delete support)
 ```
 
 #### chats
@@ -441,13 +562,134 @@ users (1) ──────< (N) payment_logs
 - created_at: TIMESTAMP DEFAULT NOW()
 ```
 
+#### session_tokens
+```sql
+- id: UUID PRIMARY KEY
+- user_id: UUID REFERENCES users(id) ON DELETE CASCADE
+- token_hash: VARCHAR(255) NOT NULL
+- device_info: JSONB
+- ip_address: INET
+- expires_at: TIMESTAMP NOT NULL
+- created_at: TIMESTAMP DEFAULT NOW()
+```
+
+#### audit_logs (Optional for MVP)
+```sql
+- id: UUID PRIMARY KEY
+- user_id: UUID REFERENCES users(id) ON DELETE SET NULL
+- action: ENUM('login', 'logout', 'register', 'password_change', 'profile_update', 'account_delete')
+- ip_address: INET
+- user_agent: TEXT
+- details: JSONB
+- created_at: TIMESTAMP DEFAULT NOW()
+```
+
 ### Indexes for Performance
 ```sql
 CREATE INDEX idx_messages_chat_created ON messages(chat_id, created_at DESC);
 CREATE INDEX idx_messages_sender ON messages(sender_id);
 CREATE INDEX idx_chat_members_user ON chat_members(user_id);
 CREATE INDEX idx_users_phone ON users(phone);
+CREATE INDEX idx_users_email ON users(email) WHERE email IS NOT NULL;
 CREATE INDEX idx_subscriptions_user_status ON subscriptions(user_id, status);
+CREATE INDEX idx_session_tokens_user ON session_tokens(user_id);
+CREATE INDEX idx_session_tokens_expires ON session_tokens(expires_at);
+CREATE INDEX idx_audit_logs_user ON audit_logs(user_id);
+CREATE INDEX idx_audit_logs_action ON audit_logs(action);
+```
+
+---
+
+## Middleware
+
+### JWT Middleware
+The JWT middleware validates Bearer tokens for protected endpoints:
+
+```go
+// Usage in routes
+app.Get("/protected", auth.Protected(), handler)
+```
+
+**Features:**
+- Extracts token from `Authorization: Bearer <token>` header
+- Validates token signature and expiration
+- Sets `userID` in request locals for handlers
+- Returns 401 for missing/invalid tokens
+
+### Rate Limiting Middleware
+Rate limiting is implemented using Redis to track request counts:
+
+```go
+// Login rate limiting - 5 attempts per 15 minutes
+rateLimiter := middleware.NewRateLimiter(redisClient)
+api.Post("/auth/login", rateLimiter.LoginRateLimit(), handler)
+```
+
+**Features:**
+- Per-phone/email tracking for login attempts
+- Automatic reset on successful login
+- Returns 429 with retry_after when limit exceeded
+
+### Request Validation Middleware
+Validates incoming request data before processing:
+
+```go
+// Register validation
+api.Post("/auth/register", middleware.ValidateRegisterRequest(), handler)
+
+// Login validation
+api.Post("/auth/login", middleware.ValidateLoginRequest(), handler)
+```
+
+**Validation Rules:**
+- Email format validation
+- Phone E.164 format validation
+- Password strength (8+ chars, uppercase, lowercase, digit)
+- Username format (3-50 chars, alphanumeric + underscore)
+
+### Last Seen Middleware
+Updates user last_seen_at timestamp on each request:
+
+```go
+// Updates last_seen_at for authenticated users
+api.Get("/users/me", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), handler)
+```
+
+**Features:**
+- Updates database only once per minute (throttled)
+- Uses Redis for caching last update time
+- Runs asynchronously to not block requests
+
+### Error Handling Middleware
+Centralized error handling with proper HTTP status codes:
+
+```go
+app := fiber.New(fiber.Config{
+    ErrorHandler: middleware.ErrorHandler(),
+})
+```
+
+**Error Response Format:**
+```json
+{
+  "error": "Error description",
+  "details": {
+    "field": "validation error message"
+  }
+}
+```
+
+### CORS Middleware
+Cross-Origin Resource Sharing configuration:
+
+```go
+app.Use(cors.New(cors.Config{
+    AllowOrigins:     "*",
+    AllowMethods:     "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
+    AllowCredentials: true,
+    MaxAge:           3600,
+}))
 ```
 
 ---
@@ -461,10 +703,12 @@ CREATE INDEX idx_subscriptions_user_status ON subscriptions(user_id, status);
 - **Vacuuming:** Auto-vacuum enabled for PostgreSQL
 
 ### 2. Caching Strategy (Redis)
-- **Session Storage:** JWT refresh tokens (TTL: 7 days)
-- **User Profile Cache:** Hot user data (TTL: 1 hour)
+- **Session Storage:** JWT refresh tokens (TTL: 30 days)
+- **User Profile Cache:** Hot user data (TTL: 5 minutes)
 - **Message Cache:** Recent messages per chat (TTL: 30 minutes)
 - **Online Status:** User presence tracking (TTL: 5 minutes)
+- **Rate Limiting:** Login attempt counters (TTL: 15 minutes)
+- **Last Seen Cache:** Throttle last_seen updates (TTL: 1 minute)
 - **Pub/Sub:** Real-time message delivery via WebSocket
 
 ### 3. Media Optimization

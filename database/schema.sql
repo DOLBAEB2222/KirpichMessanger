@@ -383,10 +383,31 @@ VALUES (
 VACUUM ANALYZE;
 
 -- =============================================
+-- Audit Logs (Optional for MVP)
+-- =============================================
+CREATE TYPE audit_action AS ENUM ('login', 'logout', 'register', 'password_change', 'profile_update', 'account_delete');
+
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    action audit_action NOT NULL,
+    ip_address INET,
+    user_agent TEXT,
+    details JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Indexes for audit_logs
+CREATE INDEX idx_audit_logs_user ON audit_logs(user_id);
+CREATE INDEX idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX idx_audit_logs_created ON audit_logs(created_at DESC);
+
+-- =============================================
 -- Comments for Documentation
 -- =============================================
 
 COMMENT ON TABLE users IS 'User accounts with authentication and profile data';
+COMMENT ON TABLE audit_logs IS 'Security audit log for authentication and account actions';
 COMMENT ON TABLE chats IS 'Chat rooms (DM and group chats)';
 COMMENT ON TABLE messages IS 'All messages sent in chats';
 COMMENT ON TABLE channels IS 'Broadcast channels (one-to-many)';

@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/websocket/v3"
 	"github.com/joho/godotenv"
 	"github.com/messenger/backend/internal/handlers"
+	"github.com/messenger/backend/internal/middleware"
 	"github.com/messenger/backend/pkg/auth"
 	"github.com/messenger/backend/pkg/cache"
 	"github.com/messenger/backend/pkg/database"
@@ -48,6 +49,9 @@ func main() {
 	auth.Initialize(jwtSecret)
 	log.Println("✓ JWT initialized")
 
+	rateLimiter := middleware.NewRateLimiter(redisClient)
+	lastSeenMiddleware := middleware.NewLastSeenMiddleware(db, redisClient)
+
 	app := fiber.New(fiber.Config{
 		AppName:               "Messenger API v1.0.0",
 		ServerHeader:          "",
@@ -57,6 +61,7 @@ func main() {
 		IdleTimeout:           time.Second * 60,
 		BodyLimit:             50 * 1024 * 1024,
 		EnablePrintRoutes:     appEnv == "development",
+		ErrorHandler:          middleware.ErrorHandler(),
 	})
 
 	app.Use(recover.New())
@@ -84,19 +89,28 @@ func main() {
 
 	api := app.Group("/api/v1")
 
-	authHandler := handlers.NewAuthHandler(db)
+	authHandler := handlers.NewAuthHandler(db, redisClient)
 	api.Post("/auth/register", authHandler.Register)
-	api.Post("/auth/login", authHandler.Login)
+	api.Post("/auth/login", rateLimiter.LoginRateLimit(), authHandler.Login)
 	api.Post("/auth/refresh", authHandler.RefreshToken)
-	api.Get("/auth/me", auth.Protected(), authHandler.GetMe)
+	api.Post("/auth/logout", auth.Protected(), authHandler.Logout)
+
+	userHandler := handlers.NewUserHandler(db, redisClient)
+
+	users := api.Group("/users")
+	users.Get("/me", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), userHandler.GetMe)
+	users.Get("/:user_id", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), userHandler.GetUser)
+	users.Patch("/me", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), userHandler.UpdateProfile)
+	users.Patch("/me/password", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), userHandler.ChangePassword)
+	users.Delete("/me", auth.Protected(), userHandler.DeleteAccount)
 
 	messageHandler := handlers.NewMessageHandler(db, redisClient)
-	messages := api.Group("/messages", auth.Protected())
+	messages := api.Group("/messages", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
 	messages.Post("/", messageHandler.SendMessage)
 	messages.Get("/:id", messageHandler.GetMessage)
 
 	chatHandler := handlers.NewChatHandler(db, redisClient)
-	chats := api.Group("/chats", auth.Protected())
+	chats := api.Group("/chats", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
 	chats.Post("/", chatHandler.CreateChat)
 	chats.Get("/", chatHandler.GetUserChats)
 	chats.Get("/:id", chatHandler.GetChat)
@@ -105,14 +119,14 @@ func main() {
 	chats.Delete("/:id/members/:userId", chatHandler.RemoveMember)
 
 	channelHandler := handlers.NewChannelHandler(db)
-	channels := api.Group("/channels", auth.Protected())
+	channels := api.Group("/channels", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
 	channels.Post("/", channelHandler.CreateChannel)
 	channels.Get("/:id", channelHandler.GetChannel)
 	channels.Post("/:id/subscribe", channelHandler.Subscribe)
 	channels.Delete("/:id/subscribe", channelHandler.Unsubscribe)
 
 	subscriptionHandler := handlers.NewSubscriptionHandler(db)
-	subscriptions := api.Group("/subscriptions", auth.Protected())
+	subscriptions := api.Group("/subscriptions", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
 	subscriptions.Post("/purchase", subscriptionHandler.PurchaseSubscription)
 	subscriptions.Get("/me", subscriptionHandler.GetMySubscription)
 
@@ -125,11 +139,7 @@ func main() {
 	})
 	app.Get("/ws", websocket.New(wsHandler.HandleWebSocket))
 
-	app.Use(func(c fiber.Ctx) error {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Route not found",
-		})
-	})
+	app.Use(middleware.NotFoundHandler())
 
 	go func() {
 		if logLevel == "debug" {
