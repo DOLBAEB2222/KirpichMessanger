@@ -35,6 +35,28 @@ type BlockedUser struct {
     BlockedAt     time.Time `json:"blocked_at"`
 }
 
+type AuditAction string
+
+const (
+    ActionLogin          AuditAction = "login"
+    ActionLogout         AuditAction = "logout"
+    ActionRegister       AuditAction = "register"
+    ActionPasswordChange AuditAction = "password_change"
+    ActionProfileUpdate  AuditAction = "profile_update"
+    ActionAccountDelete  AuditAction = "account_delete"
+)
+
+type AuditLog struct {
+    ID            uuid.UUID   `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+    UserID        *uuid.UUID  `gorm:"type:uuid" json:"user_id,omitempty"`
+    Action        AuditAction `gorm:"type:varchar(50);not null" json:"action"`
+    IPAddress     string      `gorm:"type:varchar(45)" json:"ip_address,omitempty"`
+    UserAgent     string      `gorm:"type:text" json:"user_agent,omitempty"`
+    Details       []byte      `gorm:"type:jsonb" json:"details,omitempty"`
+    CorrelationID *uuid.UUID  `gorm:"type:uuid" json:"correlation_id,omitempty"`
+    CreatedAt     time.Time   `json:"created_at"`
+}
+
 func (u *User) ToResponse() UserResponse {
     return UserResponse{
         ID:        u.ID,

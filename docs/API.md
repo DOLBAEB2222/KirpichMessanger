@@ -1210,5 +1210,32 @@ You can import the following collection for easy testing:
 
 ---
 
-**Last Updated:** 2026-02-02  
-**API Version:** v1.0.0
+**Last Updated:** 2026-02-04
+**API Version:** v1.1.0
+
+---
+
+## Crypto (E2E Encryption)
+
+### POST /crypto/register-device
+Register public keys for a device.
+
+### GET /crypto/keys/:userId
+Get public keys for all devices of a user.
+
+### POST /crypto/send-encrypted
+Send an encrypted message.
+
+---
+
+## Wiki Revisions
+
+### GET /wiki/:channelId/:slug/revisions
+Get history of changes for a wiki page.
+
+---
+
+## Monitoring
+
+### GET /metrics
+Prometheus metrics for system monitoring.

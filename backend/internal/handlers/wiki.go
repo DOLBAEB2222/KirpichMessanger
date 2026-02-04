@@ -4,7 +4,6 @@ import (
 	"log"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -110,7 +109,22 @@ func (h *WikiHandler) CreateWikiPage(c fiber.Ctx) error {
 		Order:       order,
 	}
 
-	if err := h.db.Create(&wikiPage).Error; err != nil {
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&wikiPage).Error; err != nil {
+			return err
+		}
+		revision := models.WikiRevision{
+			PageID:         wikiPage.ID,
+			Title:          wikiPage.Title,
+			Content:        wikiPage.Content,
+			CreatedByID:    uid,
+			ChangeSummary:  "Initial creation",
+			RevisionNumber: 1,
+		}
+		return tx.Create(&revision).Error
+	})
+
+	if err != nil {
 		log.Printf("Error creating wiki page: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to create wiki page",
@@ -174,6 +188,7 @@ func (h *WikiHandler) UpdateWikiPage(c fiber.Ctx) error {
 		})
 	}
 
+	// Permission check (simplified, in real app check if admin of channel)
 	if wikiPage.CreatedByID != uuid.MustParse(userID) {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": "Only the creator can edit this page",
@@ -209,7 +224,31 @@ func (h *WikiHandler) UpdateWikiPage(c fiber.Ctx) error {
 		wikiPage.ParentID = &pid
 	}
 
-	if err := h.db.Save(&wikiPage).Error; err != nil {
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&wikiPage).Error; err != nil {
+			return err
+		}
+
+		var lastRevision models.WikiRevision
+		tx.Where("page_id = ?", wikiPage.ID).Order("revision_number DESC").First(&lastRevision)
+
+		summary := "Updated page"
+		if req.ChangeSummary != nil {
+			summary = *req.ChangeSummary
+		}
+
+		revision := models.WikiRevision{
+			PageID:         wikiPage.ID,
+			Title:          wikiPage.Title,
+			Content:        wikiPage.Content,
+			CreatedByID:    uuid.MustParse(userID),
+			ChangeSummary:  summary,
+			RevisionNumber: lastRevision.RevisionNumber + 1,
+		}
+		return tx.Create(&revision).Error
+	})
+
+	if err != nil {
 		log.Printf("Error updating wiki page: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to update wiki page",
@@ -221,6 +260,40 @@ func (h *WikiHandler) UpdateWikiPage(c fiber.Ctx) error {
 	}
 
 	return c.JSON(wikiPage.ToResponse())
+}
+
+func (h *WikiHandler) GetWikiRevisions(c fiber.Ctx) error {
+	channelID := c.Params("channelId")
+	slug := c.Params("slug")
+
+	cid, err := uuid.Parse(channelID)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid channel ID",
+		})
+	}
+
+	var wikiPage models.WikiPage
+	if err := h.db.Where("channel_id = ? AND slug = ?", cid, slug).First(&wikiPage).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error": "Wiki page not found",
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Database error",
+		})
+	}
+
+	var revisions []models.WikiRevision
+	if err := h.db.Preload("CreatedBy").Where("page_id = ?", wikiPage.ID).Order("revision_number DESC").Find(&revisions).Error; err != nil {
+		log.Printf("Error fetching wiki revisions: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to fetch revisions",
+		})
+	}
+
+	return c.JSON(revisions)
 }
 
 func (h *WikiHandler) DeleteWikiPage(c fiber.Ctx) error {

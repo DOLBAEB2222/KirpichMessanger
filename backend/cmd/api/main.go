@@ -1,239 +1,262 @@
 package main
 
 import (
-    "fmt"
-    "log"
-    "os"
-    "os/signal"
-    "syscall"
-    "time"
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-    "github.com/gofiber/fiber/v3"
-    "github.com/gofiber/fiber/v3/middleware/cors"
-    "github.com/gofiber/fiber/v3/middleware/logger"
-    "github.com/gofiber/fiber/v3/middleware/recover"
-    "github.com/gofiber/websocket/v2"
-    "github.com/joho/godotenv"
-    "github.com/messenger/backend/internal/handlers"
-    "github.com/messenger/backend/internal/middleware"
-    "github.com/messenger/backend/pkg/auth"
-    "github.com/messenger/backend/pkg/cache"
-    "github.com/messenger/backend/pkg/database"
-    "github.com/messenger/backend/pkg/media"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
+	"github.com/gofiber/fiber/v3/middleware/compress"
+	"github.com/gofiber/fiber/v3/middleware/cors"
+	"github.com/gofiber/fiber/v3/middleware/logger"
+	"github.com/gofiber/fiber/v3/middleware/recover"
+	"github.com/gofiber/websocket/v2"
+	"github.com/joho/godotenv"
+	"github.com/messenger/backend/internal/handlers"
+	"github.com/messenger/backend/internal/middleware"
+	"github.com/messenger/backend/pkg/auth"
+	"github.com/messenger/backend/pkg/cache"
+	"github.com/messenger/backend/pkg/database"
+	"github.com/messenger/backend/pkg/media"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/messenger/backend/internal/services"
 )
 
 func main() {
-    godotenv.Load()
+	godotenv.Load()
 
-    appEnv := getEnv("APP_ENV", "development")
-    appPort := getEnv("APP_PORT", "8080")
-    logLevel := getEnv("LOG_LEVEL", "info")
+	appEnv := getEnv("APP_ENV", "development")
+	appPort := getEnv("APP_PORT", "8080")
+	logLevel := getEnv("LOG_LEVEL", "info")
 
-    log.Printf("Starting Messenger API Server (Environment: %s)", appEnv)
+	log.Printf("Starting Messenger API Server (Environment: %s)", appEnv)
 
-    db, err := database.Initialize()
-    if err != nil {
-        log.Fatalf("Failed to initialize database: %v", err)
-    }
-    log.Println("✓ Database connected")
+	db, err := database.Initialize()
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	log.Println("✓ Database connected")
 
-    redisClient, err := cache.Initialize()
-    if err != nil {
-        log.Fatalf("Failed to initialize Redis: %v", err)
-    }
-    log.Println("✓ Redis connected")
+	redisClient, err := cache.Initialize()
+	if err != nil {
+		log.Fatalf("Failed to initialize Redis: %v", err)
+	}
+	log.Println("✓ Redis connected")
 
-    jwtSecret := getEnv("JWT_SECRET", "changeme_jwt_secret_key")
-    if jwtSecret == "changeme_jwt_secret_key" && appEnv == "production" {
-        log.Fatal("JWT_SECRET must be set in production")
-    }
-    auth.Initialize(jwtSecret)
-    log.Println("✓ JWT initialized")
+	jwtSecret := getEnv("JWT_SECRET", "changeme_jwt_secret_key")
+	if jwtSecret == "changeme_jwt_secret_key" && appEnv == "production" {
+		log.Fatal("JWT_SECRET must be set in production")
+	}
+	auth.Initialize(jwtSecret)
+	log.Println("✓ JWT initialized")
 
-    uploader := media.NewMediaUploader()
-    if err := uploader.Initialize(); err != nil {
-        log.Printf("Warning: Failed to initialize media uploader: %v", err)
-    } else {
-        log.Println("✓ Media upload directory initialized")
-    }
+	uploader := media.NewMediaUploader()
+	if err := uploader.Initialize(); err != nil {
+		log.Printf("Warning: Failed to initialize media uploader: %v", err)
+	} else {
+		log.Println("✓ Media upload directory initialized")
+	}
 
-    rateLimiter := middleware.NewRateLimiter(redisClient)
-    lastSeenMiddleware := middleware.NewLastSeenMiddleware(db, redisClient)
+	rateLimiter := middleware.NewRateLimiter(redisClient)
+	lastSeenMiddleware := middleware.NewLastSeenMiddleware(db, redisClient)
 
-    app := fiber.New(fiber.Config{
-        AppName:               "Messenger API v1.0.0",
-        ServerHeader:          "",
-        DisableStartupMessage: false,
-        ReadTimeout:           time.Second * 30,
-        WriteTimeout:          time.Second * 30,
-        IdleTimeout:           time.Second * 60,
-        BodyLimit:             100 * 1024 * 1024,
-        EnablePrintRoutes:     appEnv == "development",
-        ErrorHandler:          middleware.ErrorHandler(),
-    })
+	workerService := services.NewWorkerService(db)
+	workerService.Start(context.Background())
 
-    app.Use(recover.New())
-    app.Use(logger.New(logger.Config{
-        Format: "[${time}] ${status} - ${latency} ${method} ${path}\n",
-        Output: os.Stdout,
-    }))
+	app := fiber.New(fiber.Config{
+		AppName:               "Messenger API v1.0.0",
+		ServerHeader:          "",
+		DisableStartupMessage: false,
+		ReadTimeout:           time.Second * 30,
+		WriteTimeout:          time.Second * 30,
+		IdleTimeout:           time.Second * 60,
+		BodyLimit:             100 * 1024 * 1024,
+		EnablePrintRoutes:     appEnv == "development",
+		ErrorHandler:          middleware.ErrorHandler(),
+	})
 
-    corsOrigins := getEnv("CORS_ORIGINS", "*")
-    app.Use(cors.New(cors.Config{
-        AllowOrigins:     corsOrigins,
-        AllowMethods:     "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-        AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
-        AllowCredentials: true,
-        MaxAge:           3600,
-    }))
+	app.Use(recover.New())
+	app.Use(compress.New(compress.Config{
+		Level: compress.LevelBestSpeed,
+	}))
+	app.Use(middleware.CorrelationID())
+	app.Use(middleware.Metrics())
+	app.Use(logger.New(logger.Config{
+		Format: "[${time}] ${status} - ${latency} ${method} ${path}\n",
+		Output: os.Stdout,
+	}))
 
-    app.Get("/health", func(c fiber.Ctx) error {
-        return c.JSON(fiber.Map{
-            "status":    "ok",
-            "timestamp": time.Now().Unix(),
-            "service":   "messenger-api",
-        })
-    })
+	corsOrigins := getEnv("CORS_ORIGINS", "*")
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     corsOrigins,
+		AllowMethods:     "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+		AllowHeaders:     "Origin,Content-Type,Accept,Authorization",
+		AllowCredentials: true,
+		MaxAge:           3600,
+	}))
 
-    app.Static("/uploads", "./uploads")
+	app.Get("/health", func(c fiber.Ctx) error {
+		return c.JSON(fiber.Map{
+			"status":    "ok",
+			"timestamp": time.Now().Unix(),
+			"service":   "messenger-api",
+		})
+	})
 
-    api := app.Group("/api/v1")
+	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
 
-    authHandler := handlers.NewAuthHandler(db, redisClient)
-    api.Post("/auth/register", authHandler.Register)
-    api.Post("/auth/login", rateLimiter.LoginRateLimit(), authHandler.Login)
-    api.Post("/auth/refresh", authHandler.RefreshToken)
-    api.Post("/auth/logout", auth.Protected(), authHandler.Logout)
+	app.Static("/uploads", "./uploads")
 
-    userHandler := handlers.NewUserHandler(db, redisClient)
+	api := app.Group("/api/v1")
 
-    users := api.Group("/users")
-    users.Get("/me", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), userHandler.GetMe)
-    users.Get("/:user_id", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), userHandler.GetUser)
-    users.Patch("/me", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), userHandler.UpdateProfile)
-    users.Patch("/me/password", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), userHandler.ChangePassword)
-    users.Delete("/me", auth.Protected(), userHandler.DeleteAccount)
+	// Shared Handlers
+	wsHandler := handlers.NewWebSocketHandler(db, redisClient)
 
-    messageHandler := handlers.NewMessageHandler(db, redisClient)
-    messages := api.Group("/messages", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
-    messages.Post("/", messageHandler.SendMessage)
-    messages.Post("/upload", rateLimiter.UploadRateLimit(), messageHandler.SendMediaMessage)
-    messages.Get("/:id", messageHandler.GetMessage)
-    messages.Patch("/:id", messageHandler.EditMessage)
-    messages.Delete("/:id", messageHandler.DeleteMessage)
+	authHandler := handlers.NewAuthHandler(db, redisClient)
+	api.Post("/auth/register", authHandler.Register)
+	api.Post("/auth/login", rateLimiter.LoginRateLimit(), authHandler.Login)
+	api.Post("/auth/refresh", authHandler.RefreshToken)
+	api.Post("/auth/logout", auth.Protected(), authHandler.Logout)
 
-    api.Get("/media/*", auth.Protected(), messageHandler.GetMediaFile)
+	userHandler := handlers.NewUserHandler(db, redisClient)
+	users := api.Group("/users")
+	users.Get("/me", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), userHandler.GetMe)
+	users.Get("/:user_id", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), userHandler.GetUser)
+	users.Patch("/me", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), userHandler.UpdateProfile)
+	users.Patch("/me/password", auth.Protected(), lastSeenMiddleware.UpdateLastSeen(), userHandler.ChangePassword)
+	users.Delete("/me", auth.Protected(), userHandler.DeleteAccount)
 
-    chatHandler := handlers.NewChatHandler(db, redisClient)
-    chats := api.Group("/chats", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
-    chats.Post("/", chatHandler.CreateChat)
-    chats.Get("/", chatHandler.GetUserChats)
-    chats.Get("/dm/:user_id", chatHandler.GetOrCreateDM)
-    chats.Get("/:id", chatHandler.GetChat)
-    chats.Get("/:id/messages", chatHandler.GetChatMessages)
-    chats.Post("/:id/read", chatHandler.MarkAsRead)
-    chats.Post("/:id/members", chatHandler.AddMember)
-    chats.Delete("/:id/members/:userId", chatHandler.RemoveMember)
+	messageHandler := handlers.NewMessageHandler(db, redisClient)
+	messages := api.Group("/messages", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
+	messages.Post("/", messageHandler.SendMessage)
+	messages.Post("/upload", rateLimiter.UploadRateLimit(), messageHandler.SendMediaMessage)
+	messages.Get("/:id", messageHandler.GetMessage)
+	messages.Patch("/:id", messageHandler.EditMessage)
+	messages.Delete("/:id", messageHandler.DeleteMessage)
 
-    channelHandler := handlers.NewChannelHandler(db)
-    channels := api.Group("/channels", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
-    channels.Post("/", channelHandler.CreateChannel)
-    channels.Get("/:id", channelHandler.GetChannel)
-    channels.Post("/:id/subscribe", channelHandler.Subscribe)
-    channels.Delete("/:id/subscribe", channelHandler.Unsubscribe)
+	api.Get("/media/*", auth.Protected(), messageHandler.GetMediaFile)
 
-    wikiHandler := handlers.NewWikiHandler(db)
-    wiki := api.Group("/wiki", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
-    wiki.Post("/", wikiHandler.CreateWikiPage)
-    wiki.Get("/:channelId/:slug", wikiHandler.GetWikiPage)
-    wiki.Patch("/:channelId/:slug", wikiHandler.UpdateWikiPage)
-    wiki.Delete("/:channelId/:slug", wikiHandler.DeleteWikiPage)
-    wiki.Get("/:channelId", wikiHandler.ListWikiPages)
-    wiki.Get("/:channelId/tree", wikiHandler.GetWikiTree)
+	chatHandler := handlers.NewChatHandler(db, redisClient)
+	chats := api.Group("/chats", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
+	chats.Post("/", chatHandler.CreateChat)
+	chats.Get("/", chatHandler.GetUserChats)
+	chats.Get("/dm/:user_id", chatHandler.GetOrCreateDM)
+	chats.Get("/:id", chatHandler.GetChat)
+	chats.Get("/:id/messages", chatHandler.GetChatMessages)
+	chats.Post("/:id/read", chatHandler.MarkAsRead)
+	chats.Post("/:id/members", chatHandler.AddMember)
+	chats.Delete("/:id/members/:userId", chatHandler.RemoveMember)
 
-    codeHandler := handlers.NewCodeHandler(db)
-    code := api.Group("/code", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
-    code.Post("/", codeHandler.CreateCodeSnippet)
-    code.Get("/:id", codeHandler.GetCodeSnippet)
-    code.Patch("/:id", codeHandler.UpdateCodeSnippet)
-    code.Delete("/:id", codeHandler.DeleteCodeSnippet)
-    code.Get("/chat/:chatId", codeHandler.ListCodeSnippetsByChat)
-    code.Get("/message/:messageId", codeHandler.GetCodeSnippetByMessage)
+	channelHandler := handlers.NewChannelHandler(db)
+	channels := api.Group("/channels", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
+	channels.Post("/", channelHandler.CreateChannel)
+	channels.Get("/:id", channelHandler.GetChannel)
+	channels.Post("/:id/subscribe", channelHandler.Subscribe)
+	channels.Delete("/:id/subscribe", channelHandler.Unsubscribe)
 
-    tempRoleHandler := handlers.NewTempRoleHandler(db)
-    tempRoles := api.Group("/temp-roles", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
-    tempRoles.Post("/", tempRoleHandler.GrantTempRole)
-    tempRoles.Get("/:id", tempRoleHandler.GetTempRole)
-    tempRoles.Patch("/:id", tempRoleHandler.UpdateTempRole)
-    tempRoles.Delete("/:id", tempRoleHandler.RevokeTempRole)
-    tempRoles.Get("/target/:targetId/:targetType", tempRoleHandler.ListTargetRoles)
-    tempRoles.Get("/user/:userId", tempRoleHandler.ListUserRoles)
-    tempRoles.Get("/check/:userId/:targetId", tempRoleHandler.CheckUserPermission)
+	wikiHandler := handlers.NewWikiHandler(db)
+	wiki := api.Group("/wiki", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
+	wiki.Post("/", wikiHandler.CreateWikiPage)
+	wiki.Get("/:channelId/:slug", wikiHandler.GetWikiPage)
+	wiki.Patch("/:channelId/:slug", wikiHandler.UpdateWikiPage)
+	wiki.Get("/:channelId/:slug/revisions", wikiHandler.GetWikiRevisions)
+	wiki.Delete("/:channelId/:slug", wikiHandler.DeleteWikiPage)
+	wiki.Get("/:channelId", wikiHandler.ListWikiPages)
+	wiki.Get("/:channelId/tree", wikiHandler.GetWikiTree)
 
-    rssHandler := handlers.NewRSSHandler(db)
-    rss := api.Group("/rss", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
-    rss.Post("/", rssHandler.AddRSSFeed)
-    rss.Get("/:id", rssHandler.GetRSSFeed)
-    rss.Patch("/:id", rssHandler.UpdateRSSFeed)
-    rss.Delete("/:id", rssHandler.DeleteRSSFeed)
-    rss.Get("/", rssHandler.ListRSSFeeds)
-    rss.Get("/:id/items", rssHandler.GetRSSFeedItems)
-    rss.Post("/:id/refresh", rssHandler.RefreshRSSFeed)
+	codeHandler := handlers.NewCodeHandler(db)
+	code := api.Group("/code", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
+	code.Post("/", codeHandler.CreateCodeSnippet)
+	code.Get("/:id", codeHandler.GetCodeSnippet)
+	code.Patch("/:id", codeHandler.UpdateCodeSnippet)
+	code.Delete("/:id", codeHandler.DeleteCodeSnippet)
+	code.Get("/chat/:chatId", codeHandler.ListCodeSnippetsByChat)
+	code.Get("/message/:messageId", codeHandler.GetCodeSnippetByMessage)
 
-    subscriptionHandler := handlers.NewSubscriptionHandler(db)
-    subscriptions := api.Group("/subscriptions", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
-    subscriptions.Post("/purchase", subscriptionHandler.PurchaseSubscription)
-    subscriptions.Get("/me", subscriptionHandler.GetMySubscription)
+	tempRoleHandler := handlers.NewTempRoleHandler(db, wsHandler)
+	tempRoles := api.Group("/temp-roles", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
+	tempRoles.Post("/", tempRoleHandler.GrantTempRole)
+	tempRoles.Get("/:id", tempRoleHandler.GetTempRole)
+	tempRoles.Patch("/:id", tempRoleHandler.UpdateTempRole)
+	tempRoles.Delete("/:id", tempRoleHandler.RevokeTempRole)
+	tempRoles.Get("/target/:targetId/:targetType", tempRoleHandler.ListTargetRoles)
+	tempRoles.Get("/user/:userId", tempRoleHandler.ListUserRoles)
+	tempRoles.Get("/check/:userId/:targetId", tempRoleHandler.CheckUserPermission)
 
-    wsHandler := handlers.NewWebSocketHandler(db, redisClient)
+	rssHandler := handlers.NewRSSHandler(db)
+	rss := api.Group("/rss", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
+	rss.Post("/", rssHandler.AddRSSFeed)
+	rss.Get("/:id", rssHandler.GetRSSFeed)
+	rss.Patch("/:id", rssHandler.UpdateRSSFeed)
+	rss.Delete("/:id", rssHandler.DeleteRSSFeed)
+	rss.Get("/", rssHandler.ListRSSFeeds)
+	rss.Get("/:id/items", rssHandler.GetRSSFeedItems)
+	rss.Post("/:id/refresh", rssHandler.RefreshRSSFeed)
 
-    callHandler := handlers.NewCallHandler(db, redisClient, wsHandler)
-    calls := api.Group("/calls", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
-    calls.Post("/", callHandler.InitiateCall)
-    calls.Get("/ice-servers", callHandler.GetICEServers)
-    calls.Get("/:call_id", callHandler.GetCall)
-    calls.Patch("/:call_id", callHandler.RespondToCall)
-    calls.Delete("/:call_id", callHandler.EndCall)
-    calls.Post("/:call_id/signal", callHandler.SaveCallSignal)
-    app.Use("/ws", func(c fiber.Ctx) error {
-        if websocket.IsWebSocketUpgrade(c) {
-            return c.Next()
-        }
-        return fiber.ErrUpgradeRequired
-    })
-    app.Get("/ws", websocket.New(wsHandler.HandleWebSocket))
+	subscriptionHandler := handlers.NewSubscriptionHandler(db)
+	subscriptions := api.Group("/subscriptions", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
+	subscriptions.Post("/purchase", subscriptionHandler.PurchaseSubscription)
+	subscriptions.Get("/me", subscriptionHandler.GetMySubscription)
 
-    app.Use(middleware.NotFoundHandler())
+	cryptoHandler := handlers.NewCryptoHandler(db)
+	crypto := api.Group("/crypto", auth.Protected())
+	crypto.Post("/register-device", cryptoHandler.RegisterDevice)
+	crypto.Get("/keys/:userId", cryptoHandler.GetUserKeys)
+	crypto.Post("/send-encrypted", cryptoHandler.SendEncrypted)
 
-    go func() {
-        if logLevel == "debug" {
-            log.Printf("Starting server on port %s", appPort)
-        }
-        if err := app.Listen(fmt.Sprintf(":%s", appPort)); err != nil {
-            log.Fatalf("Failed to start server: %v", err)
-        }
-    }()
+	callHandler := handlers.NewCallHandler(db, redisClient, wsHandler)
+	calls := api.Group("/calls", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
+	calls.Post("/", callHandler.InitiateCall)
+	calls.Get("/ice-servers", callHandler.GetICEServers)
+	calls.Get("/:call_id", callHandler.GetCall)
+	calls.Patch("/:call_id", callHandler.RespondToCall)
+	calls.Delete("/:call_id", callHandler.EndCall)
+	calls.Post("/:call_id/signal", callHandler.SaveCallSignal)
 
-    quit := make(chan os.Signal, 1)
-    signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-    <-quit
+	app.Use("/ws", func(c fiber.Ctx) error {
+		if websocket.IsWebSocketUpgrade(c) {
+			return c.Next()
+		}
+		return fiber.ErrUpgradeRequired
+	})
+	app.Get("/ws", websocket.New(wsHandler.HandleWebSocket))
 
-    log.Println("Shutting down gracefully...")
-    if err := app.Shutdown(); err != nil {
-        log.Printf("Server shutdown error: %v", err)
-    }
+	app.Use(middleware.NotFoundHandler())
 
-    if sqlDB, err := db.DB(); err == nil {
-        sqlDB.Close()
-    }
-    redisClient.Close()
+	go func() {
+		if logLevel == "debug" {
+			log.Printf("Starting server on port %s", appPort)
+		}
+		if err := app.Listen(fmt.Sprintf(":%s", appPort)); err != nil {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
 
-    log.Println("Server stopped")
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down gracefully...")
+	if err := app.Shutdown(); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.Close()
+	}
+	redisClient.Close()
+
+	log.Println("Server stopped")
 }
 
 func getEnv(key, defaultValue string) string {
-    if value := os.Getenv(key); value != "" {
-        return value
-    }
-    return defaultValue
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }

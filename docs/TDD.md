@@ -9,12 +9,13 @@
 
 ## Executive Summary
 
-This messenger application is designed as a scalable Telegram clone with a focus on resource efficiency. The MVP includes core messaging features, group chats, channels, and a **stub payment system** (no real payment processing). End-to-end encryption (E2E) is planned for stage 3-4, not included in MVP.
+This messenger application is designed as a scalable Telegram clone with a focus on resource efficiency. The application includes core messaging features, group chats, channels, E2E encryption, and monitoring.
 
-### Key MVP Limitations & Future Plans
-1. **Payment System (MVP):** Stub implementation - logs payment to database, activates premium without card validation. Real Stripe/Yookassa integration planned for stage 2.
-2. **E2E Encryption:** Planned for stage 3-4. MVP uses HTTPS transport security only.
-3. **Scalability:** Architecture supports 500+ users and horizontal scaling, but optimized for 4GB RAM deployment.
+### Key Features
+1. **Payment System (MVP):** Stub implementation.
+2. **E2E Encryption:** Implemented using Signal Protocol concepts (X3DH) for secure messaging.
+3. **Monitoring:** Full integration with Prometheus and Grafana.
+4. **Scalability:** Architecture supports 500+ users, optimized for 4GB RAM deployment.
 
 ---
 
