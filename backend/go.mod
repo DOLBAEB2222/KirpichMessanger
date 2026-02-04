@@ -9,6 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/redis/go-redis/v9 v9.4.0
 	golang.org/x/crypto v0.18.0
+	golang.org/x/image v0.15.0
 	gorm.io/driver/postgres v1.5.4
 	gorm.io/gorm v1.25.5
 )

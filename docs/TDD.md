@@ -439,21 +439,150 @@ Response (200):
 }
 ```
 
+### DM Endpoints
+
+#### 3. Get or Create DM Chat
+```http
+GET /chats/dm/:user_id
+Authorization: Bearer <token>
+
+Response (200) - Existing chat:
+{
+  "id": "uuid",
+  "name": "other_user_username",
+  "type": "dm",
+  "member_count": 2,
+  "created_at": "2024-01-15T10:00:00Z"
+}
+
+Response (201) - New chat created:
+{
+  "id": "uuid",
+  "name": "other_user_username",
+  "type": "dm",
+  "member_count": 2,
+  "created_at": "2024-01-15T10:00:00Z"
+}
+```
+
+#### 4. Mark Chat as Read
+```http
+POST /chats/:chat_id/read
+Authorization: Bearer <token>
+
+Response (200):
+{
+  "message": "Marked as read",
+  "unread_count": 0
+}
+```
+
+### Media Endpoints
+
+#### 5. Upload Media File
+```http
+POST /messages/upload
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+
+Request:
+- chat_id: "uuid" (required)
+- file: <binary file> (required, max 100MB)
+- content: "optional caption" (optional)
+
+Response (201):
+{
+  "message": {
+    "id": "uuid",
+    "sender_id": "uuid",
+    "chat_id": "uuid",
+    "content": "optional caption",
+    "message_type": "image",
+    "media_url": "uploads/2025/02/04/file.webp",
+    "created_at": "2024-01-15T10:05:00Z"
+  },
+  "media": {
+    "file_path": "uploads/2025/02/04/file.webp",
+    "file_size": 15420,
+    "mime_type": "image/webp",
+    "width": 500,
+    "height": 375,
+    "thumbnail": "uploads/2025/02/04/file_thumb.jpg",
+    "compressed": true
+  }
+}
+```
+
+#### 6. Get Media File
+```http
+GET /media/:file_path?u=user_id&t=timestamp&s=signature
+Authorization: Bearer <token>
+
+Response: Binary file data with appropriate Content-Type header
+```
+
 ### WebSocket Endpoint
 
-#### 9. Real-time Connection
+#### 7. Real-time Connection
 ```
 WS /ws
 Authorization: Bearer <token> (via query param or header)
+```
 
-Client → Server Messages:
+**Client → Server Messages:**
+
+Send message:
+```json
 {
   "type": "message",
   "chat_id": "uuid",
   "content": "Hello"
 }
+```
 
-Server → Client Messages:
+Typing indicator:
+```json
+{
+  "type": "typing",
+  "chat_id": "uuid"
+}
+```
+
+Read receipt:
+```json
+{
+  "type": "read",
+  "chat_id": "uuid"
+}
+```
+
+Join chat (for presence):
+```json
+{
+  "type": "join_chat",
+  "chat_id": "uuid"
+}
+```
+
+Leave chat:
+```json
+{
+  "type": "leave_chat",
+  "chat_id": "uuid"
+}
+```
+
+Ping (keepalive):
+```json
+{
+  "type": "ping"
+}
+```
+
+**Server → Client Messages:**
+
+New message:
+```json
 {
   "type": "new_message",
   "message": {
@@ -462,6 +591,65 @@ Server → Client Messages:
     "content": "Hello",
     "created_at": "2024-01-15T10:00:00Z"
   }
+}
+```
+
+Typing indicator:
+```json
+{
+  "type": "typing",
+  "chat_id": "uuid",
+  "user_id": "uuid",
+  "is_typing": true,
+  "timestamp": 1705312800
+}
+```
+
+Read receipt:
+```json
+{
+  "type": "read",
+  "chat_id": "uuid",
+  "user_id": "uuid",
+  "last_read_at": "2024-01-15T10:00:00Z",
+  "unread_count": 0,
+  "message_id": "uuid"
+}
+```
+
+Online status:
+```json
+{
+  "type": "online_status",
+  "user_id": "uuid",
+  "is_online": true,
+  "timestamp": 1705312800
+}
+```
+
+Chat presence:
+```json
+{
+  "type": "chat_presence",
+  "chat_id": "uuid",
+  "user_id": "uuid",
+  "is_joined": true
+}
+```
+
+User chats list (sent on connect):
+```json
+{
+  "type": "user_chats",
+  "chat_ids": ["uuid1", "uuid2", "uuid3"]
+}
+```
+
+Pong:
+```json
+{
+  "type": "pong",
+  "timestamp": 1705312800
 }
 ```
 
