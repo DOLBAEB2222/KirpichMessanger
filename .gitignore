@@ -46,7 +46,9 @@ uploads/
 *.sql
 *.dump
 backups/
+backup/
 !database/schema.sql
+!database/migration_v2.sql
 
 # Docker volumes
 postgres_data/

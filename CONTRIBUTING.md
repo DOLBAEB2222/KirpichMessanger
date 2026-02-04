@@ -446,6 +446,61 @@ featureHandler := handlers.NewFeatureHandler(db)
 api.Post("/features", auth.Protected(), featureHandler.Create)
 ```
 
+#### 4. Update Database Schema
+```bash
+# Add migration to database/migration_vX.sql
+# Or update database/schema.sql for new installations
+```
+
+#### 5. Update Documentation
+- Add API docs to `docs/TDD.md`
+- Update README.md if it's a user-facing feature
+- Add examples to `docs/FEATURES.md`
+
+### Working with New Features (v2)
+
+#### Wiki Pages
+- Location: `backend/internal/models/wiki.go`, `backend/internal/handlers/wiki.go`
+- Supports: Markdown, hierarchical structure, custom ordering
+- Testing: Create page, update content, verify tree structure
+
+#### Code Snippets
+- Location: `backend/internal/models/code.go`, `backend/internal/handlers/code.go`
+- Supports: Multiple languages, syntax highlighting, message linking
+- Testing: Create snippet, retrieve by chat, verify language filtering
+
+#### Temporary Roles
+- Location: `backend/internal/models/temp_roles.go`, `backend/internal/handlers/temp_roles.go`
+- Supports: Custom permissions, expiration, permission checking
+- Testing: Grant role, check permission, verify expiration
+
+#### RSS Aggregator
+- Location: `backend/internal/models/rss.go`, `backend/internal/handlers/rss.go`
+- Supports: RSS 2.0/Atom parsing, auto-refresh, duplicate detection
+- Testing: Add feed, refresh feed, retrieve items
+
+### Resource Optimization Guidelines
+
+When adding new features, keep resource limits in mind:
+- **Memory**: Total application memory should not exceed 900MB
+- **Database**: Efficient queries with proper indexes
+- **Cache**: Use Redis for frequently accessed data
+- **Connections**: Limit database connections (max 20)
+
+### Performance Testing
+
+Before merging features:
+```bash
+# Run load test with Artillery
+artillery quick --count 100 --num 10 http://localhost:8080/api/v1/messages
+
+# Monitor resource usage
+docker stats
+
+# Check database query performance
+docker exec messenger-postgres psql -U messenger -d messenger -c "EXPLAIN ANALYZE SELECT ..."
+```
+
 ---
 
 ## Common Issues

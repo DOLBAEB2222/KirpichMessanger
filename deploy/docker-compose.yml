@@ -9,6 +9,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-messenger}
       POSTGRES_USER: ${POSTGRES_USER:-messenger}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5432:5432"
@@ -16,19 +17,37 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ../database/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
       - ../config/postgres.conf:/etc/postgresql/postgresql.conf:ro
-    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c shared_buffers=128MB
+      -c effective_cache_size=512MB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=4MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=128MB
+      -c max_wal_size=512MB
+      -c max_worker_processes=2
+      -c max_parallel_workers_per_gather=1
+      -c max_parallel_workers=2
     deploy:
       resources:
         limits:
-          memory: 800M
+          cpus: '1.0'
+          memory: 700M
         reservations:
-          memory: 256M
+          cpus: '0.5'
+          memory: 200M
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-messenger} -d ${POSTGRES_DB:-messenger}"]
-      interval: 10s
+      interval: 15s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - messenger_network
 
@@ -38,11 +57,17 @@ services:
     restart: always
     command: >
       redis-server
-      --maxmemory 256mb
+      --maxmemory 200mb
       --maxmemory-policy allkeys-lru
-      --save 60 1000
+      --save 900 1
+      --save 300 10
+      --save 60 10000
       --appendonly yes
       --appendfsync everysec
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+      --databases 16
     ports:
       - "6379:6379"
     volumes:
@@ -50,15 +75,17 @@ services:
     deploy:
       resources:
         limits:
-          memory: 300M
+          cpus: '0.5'
+          memory: 250M
         reservations:
-          memory: 64M
+          cpus: '0.2'
+          memory: 50M
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 15s
       timeout: 3s
-      retries: 5
-      start_period: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - messenger_network
 
@@ -71,13 +98,18 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-production}
       APP_PORT: ${APP_PORT:-8080}
+      GOMAXPROCS: 2
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${POSTGRES_DB:-messenger}
       DB_USER: ${POSTGRES_USER:-messenger}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      DB_MAX_OPEN_CONNS: 20
+      DB_MAX_IDLE_CONNS: 10
+      DB_CONN_MAX_LIFETIME: 300
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_MAX_POOL_SIZE: 10
       JWT_SECRET: ${JWT_SECRET:-changeme_jwt_secret_key}
       JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-24}
       UPLOAD_MAX_SIZE_MB: ${UPLOAD_MAX_SIZE_MB:-50}
@@ -97,15 +129,17 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          cpus: '1.5'
+          memory: 900M
         reservations:
-          memory: 256M
+          cpus: '0.5'
+          memory: 200M
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
-      interval: 15s
+      interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 30s
     networks:
       - messenger_network
 
@@ -131,9 +165,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 200M
+          cpus: '0.5'
+          memory: 150M
         reservations:
-          memory: 64M
+          cpus: '0.1'
+          memory: 50M
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:2019/metrics"]
       interval: 30s
@@ -164,9 +200,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 200M
+          cpus: '0.5'
+          memory: 150M
         reservations:
-          memory: 64M
+          cpus: '0.1'
+          memory: 50M
     networks:
       - messenger_network
 
