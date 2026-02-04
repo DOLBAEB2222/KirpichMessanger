@@ -118,6 +118,86 @@ func (rl *RateLimiter) UploadRateLimit() fiber.Handler {
     }
 }
 
+func (rl *RateLimiter) IPRateLimit() fiber.Handler {
+    return func(c fiber.Ctx) error {
+        key := fmt.Sprintf("ratelimit:ip:%s", c.IP())
+        ctx := context.Background()
+
+        maxRequests := 100 // per minute
+        window := time.Minute
+
+        current, err := rl.redis.Get(ctx, key).Int()
+        if err != nil && err != redis.Nil {
+            return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+                "error": "Rate limiting error",
+            })
+        }
+
+        if current >= maxRequests {
+            ttl, _ := rl.redis.TTL(ctx, key).Result()
+            return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+                "error":       "IP rate limit exceeded",
+                "retry_after": int(ttl.Seconds()),
+            })
+        }
+
+        pipe := rl.redis.Pipeline()
+        pipe.Incr(ctx, key)
+        pipe.Expire(ctx, key, window)
+        _, err = pipe.Exec(ctx)
+        if err != nil {
+            return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+                "error": "Rate limiting error",
+            })
+        }
+
+        return c.Next()
+    }
+}
+
+func (rl *RateLimiter) UserRateLimit() fiber.Handler {
+    return func(c fiber.Ctx) error {
+        userID := c.Locals("userID")
+        if userID == nil {
+            return c.Next()
+        }
+
+        userIDStr := userID.(string)
+        key := fmt.Sprintf("ratelimit:user:%s", userIDStr)
+        ctx := context.Background()
+
+        maxRequests := 200 // per minute
+        window := time.Minute
+
+        current, err := rl.redis.Get(ctx, key).Int()
+        if err != nil && err != redis.Nil {
+            return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+                "error": "Rate limiting error",
+            })
+        }
+
+        if current >= maxRequests {
+            ttl, _ := rl.redis.TTL(ctx, key).Result()
+            return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+                "error":       "User rate limit exceeded",
+                "retry_after": int(ttl.Seconds()),
+            })
+        }
+
+        pipe := rl.redis.Pipeline()
+        pipe.Incr(ctx, key)
+        pipe.Expire(ctx, key, window)
+        _, err = pipe.Exec(ctx)
+        if err != nil {
+            return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+                "error": "Rate limiting error",
+            })
+        }
+
+        return c.Next()
+    }
+}
+
 func getIdentifier(c fiber.Ctx) string {
     body := struct {
         PhoneOrEmail string `json:"phone_or_email"`
