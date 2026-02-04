@@ -19,6 +19,7 @@ import (
 	"github.com/messenger/backend/pkg/auth"
 	"github.com/messenger/backend/pkg/cache"
 	"github.com/messenger/backend/pkg/database"
+	"github.com/messenger/backend/pkg/media"
 )
 
 func main() {
@@ -49,6 +50,13 @@ func main() {
 	auth.Initialize(jwtSecret)
 	log.Println("✓ JWT initialized")
 
+	uploader := media.NewMediaUploader()
+	if err := uploader.Initialize(); err != nil {
+		log.Printf("Warning: Failed to initialize media uploader: %v", err)
+	} else {
+		log.Println("✓ Media upload directory initialized")
+	}
+
 	rateLimiter := middleware.NewRateLimiter(redisClient)
 	lastSeenMiddleware := middleware.NewLastSeenMiddleware(db, redisClient)
 
@@ -59,7 +67,7 @@ func main() {
 		ReadTimeout:           time.Second * 30,
 		WriteTimeout:          time.Second * 30,
 		IdleTimeout:           time.Second * 60,
-		BodyLimit:             50 * 1024 * 1024,
+		BodyLimit:             100 * 1024 * 1024,
 		EnablePrintRoutes:     appEnv == "development",
 		ErrorHandler:          middleware.ErrorHandler(),
 	})
@@ -87,6 +95,8 @@ func main() {
 		})
 	})
 
+	app.Static("/uploads", "./uploads")
+
 	api := app.Group("/api/v1")
 
 	authHandler := handlers.NewAuthHandler(db, redisClient)
@@ -107,14 +117,21 @@ func main() {
 	messageHandler := handlers.NewMessageHandler(db, redisClient)
 	messages := api.Group("/messages", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
 	messages.Post("/", messageHandler.SendMessage)
+	messages.Post("/upload", messageHandler.SendMediaMessage)
 	messages.Get("/:id", messageHandler.GetMessage)
+	messages.Patch("/:id", messageHandler.EditMessage)
+	messages.Delete("/:id", messageHandler.DeleteMessage)
+
+	api.Get("/media/*", auth.Protected(), messageHandler.GetMediaFile)
 
 	chatHandler := handlers.NewChatHandler(db, redisClient)
 	chats := api.Group("/chats", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
 	chats.Post("/", chatHandler.CreateChat)
 	chats.Get("/", chatHandler.GetUserChats)
+	chats.Get("/dm/:user_id", chatHandler.GetOrCreateDM)
 	chats.Get("/:id", chatHandler.GetChat)
 	chats.Get("/:id/messages", chatHandler.GetChatMessages)
+	chats.Post("/:id/read", chatHandler.MarkAsRead)
 	chats.Post("/:id/members", chatHandler.AddMember)
 	chats.Delete("/:id/members/:userId", chatHandler.RemoveMember)
 

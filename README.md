@@ -6,12 +6,29 @@ A high-performance, resource-efficient messenger application built with Go, opti
 
 ### Core Features (MVP)
 - ✅ **User Authentication** - JWT-based secure authentication
-- ✅ **Direct Messages (DM)** - One-on-one conversations
+- ✅ **Direct Messages (DM)** - One-on-one conversations with automatic chat creation
 - ✅ **Group Chats** - Multi-user group messaging
 - ✅ **Channels** - Broadcast channels for announcements
-- ✅ **Real-time Messaging** - WebSocket-based instant messaging
-- ✅ **Media Sharing** - Image, video, audio, and file uploads
+- ✅ **Real-time Messaging** - WebSocket-based instant messaging with Redis pub/sub
+- ✅ **Media Sharing** - Image, video, audio, and file uploads with compression
 - ✅ **Premium Subscriptions** - Tiered subscription system
+
+### DM Features (Stage 3)
+- ✅ **Get or Create DM** - `GET /chats/dm/:user_id` endpoint for quick DM access
+- ✅ **DM Uniqueness** - Only one DM chat exists between any two users
+- ✅ **Auto-named Chats** - DM chats automatically named after the other user
+- ✅ **Read Receipts** - Real-time read status updates via WebSocket
+- ✅ **Typing Indicators** - Real-time typing status with 3-second debounce
+- ✅ **Online Status** - User presence tracking via WebSocket
+
+### Media Features (Stage 3)
+- ✅ **Image Compression** - Automatic resizing to 500px for mobile optimization
+- ✅ **WebP Conversion** - Images converted to WebP for smaller file sizes
+- ✅ **Thumbnail Generation** - 200x200 thumbnails for previews
+- ✅ **File Validation** - MIME type and extension validation
+- ✅ **Secure Storage** - Organized by date (`uploads/2025/02/04/`)
+- ✅ **Size Limits** - 100MB max per file (MVP)
+- ✅ **Supported Types**: JPEG, PNG, GIF, WebP, MP4, WebM, MP3, WAV
 
 ### Premium Features
 - Higher upload limits (500MB vs 50MB)
@@ -207,10 +224,44 @@ Content-Type: application/json
 }
 ```
 
+#### Send Media Message
+```http
+POST /api/v1/messages/upload
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+
+chat_id: "uuid"
+file: <binary file>
+content: "Optional caption"
+```
+
 #### Get Chat Messages
 ```http
 GET /api/v1/chats/:chatId/messages?limit=50&offset=0
 Authorization: Bearer <token>
+```
+
+#### Mark Chat as Read
+```http
+POST /api/v1/chats/:chatId/read
+Authorization: Bearer <token>
+```
+
+### DM
+
+#### Get or Create DM Chat
+```http
+GET /api/v1/chats/dm/:user_id
+Authorization: Bearer <token>
+
+# Returns existing chat or creates new one
+# Response (200 or 201):
+{
+  "id": "uuid",
+  "name": "other_user_username",
+  "type": "dm",
+  "member_count": 2
+}
 ```
 
 ### Subscriptions (MVP - Stub Payment)
@@ -237,6 +288,43 @@ Content-Type: application/json
     "end_date": "2024-02-15"
   }
 }
+```
+
+### WebSocket Real-time Events
+
+Connect to WebSocket for real-time updates:
+```
+WS /ws?token=<jwt_token>
+```
+
+**Client → Server:**
+```json
+// Send message
+{ "type": "message", "chat_id": "uuid", "content": "Hello" }
+
+// Typing indicator
+{ "type": "typing", "chat_id": "uuid" }
+
+// Mark as read
+{ "type": "read", "chat_id": "uuid" }
+
+// Join chat for presence
+{ "type": "join_chat", "chat_id": "uuid" }
+```
+
+**Server → Client:**
+```json
+// New message
+{ "type": "new_message", "message": { ... } }
+
+// Typing status
+{ "type": "typing", "chat_id": "uuid", "user_id": "uuid", "is_typing": true }
+
+// Read receipt
+{ "type": "read", "chat_id": "uuid", "user_id": "uuid", "unread_count": 0 }
+
+// Online status
+{ "type": "online_status", "user_id": "uuid", "is_online": true }
 ```
 
 See [TDD.md](docs/TDD.md) for complete API documentation.
