@@ -1,523 +1,613 @@
 package handlers
 
 import (
-	"context"
-	"encoding/json"
-	"log"
-	"sync"
-	"time"
+    "context"
+    "encoding/json"
+    "log"
+    "sync"
+    "time"
 
-	"github.com/gofiber/websocket/v3"
-	"github.com/google/uuid"
-	"github.com/messenger/backend/internal/models"
-	"github.com/messenger/backend/pkg/auth"
-	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
+    "github.com/gofiber/websocket/v2"
+    "github.com/google/uuid"
+    "github.com/messenger/backend/internal/models"
+    "github.com/messenger/backend/pkg/auth"
+    "github.com/redis/go-redis/v9"
+    "gorm.io/gorm"
 )
 
 type WebSocketHandler struct {
-	db          *gorm.DB
-	redis       *redis.Client
-	clients     sync.Map
-	typingMu    sync.RWMutex
-	typingUsers map[string]map[string]time.Time
+    db          *gorm.DB
+    redis       *redis.Client
+    clients     sync.Map
+    typingMu    sync.RWMutex
+    typingUsers map[string]map[string]time.Time
 }
 
 type WSClient struct {
-	UserID    string
-	Conn      *websocket.Conn
-	Send      chan []byte
-	ChatRooms sync.Map
+    UserID    string
+    Conn      *websocket.Conn
+    Send      chan []byte
+    ChatRooms sync.Map
 }
 
 type WSMessage struct {
-	Type      string      `json:"type"`
-	ChatID    string      `json:"chat_id,omitempty"`
-	Content   string      `json:"content,omitempty"`
-	Data      interface{} `json:"data,omitempty"`
-	Timestamp int64       `json:"timestamp,omitempty"`
+    Type      string      `json:"type"`
+    ChatID    string      `json:"chat_id,omitempty"`
+    Content   string      `json:"content,omitempty"`
+    Data      interface{} `json:"data,omitempty"`
+    Timestamp int64       `json:"timestamp,omitempty"`
 }
 
 type TypingEvent struct {
-	Type      string `json:"type"`
-	ChatID    string `json:"chat_id"`
-	UserID    string `json:"user_id"`
-	IsTyping  bool   `json:"is_typing"`
-	Timestamp int64  `json:"timestamp"`
+    Type      string `json:"type"`
+    ChatID    string `json:"chat_id"`
+    UserID    string `json:"user_id"`
+    IsTyping  bool   `json:"is_typing"`
+    Timestamp int64  `json:"timestamp"`
 }
 
 type ReadReceiptEvent struct {
-	Type           string    `json:"type"`
-	ChatID         string    `json:"chat_id"`
-	UserID         string    `json:"user_id"`
-	LastReadAt     time.Time `json:"last_read_at"`
-	UnreadCount    int64     `json:"unread_count"`
-	MessageID      *string   `json:"message_id,omitempty"`
+    Type           string    `json:"type"`
+    ChatID         string    `json:"chat_id"`
+    UserID         string    `json:"user_id"`
+    LastReadAt     time.Time `json:"last_read_at"`
+    UnreadCount    int64     `json:"unread_count"`
+    MessageID      *string   `json:"message_id,omitempty"`
 }
 
 type OnlineStatusEvent struct {
-	Type      string `json:"type"`
-	UserID    string `json:"user_id"`
-	IsOnline  bool   `json:"is_online"`
-	LastSeen  string `json:"last_seen,omitempty"`
-	Timestamp int64  `json:"timestamp"`
+    Type      string `json:"type"`
+    UserID    string `json:"user_id"`
+    IsOnline  bool   `json:"is_online"`
+    LastSeen  string `json:"last_seen,omitempty"`
+    Timestamp int64  `json:"timestamp"`
 }
 
 type ChatPresenceEvent struct {
-	Type     string `json:"type"`
-	ChatID   string `json:"chat_id"`
-	UserID   string `json:"user_id"`
-	IsJoined bool   `json:"is_joined"`
+    Type     string `json:"type"`
+    ChatID   string `json:"chat_id"`
+    UserID   string `json:"user_id"`
+    IsJoined bool   `json:"is_joined"`
 }
 
 func NewWebSocketHandler(db *gorm.DB, redisClient *redis.Client) *WebSocketHandler {
-	return &WebSocketHandler{
-		db:          db,
-		redis:       redisClient,
-		typingUsers: make(map[string]map[string]time.Time),
-	}
+    return &WebSocketHandler{
+        db:          db,
+        redis:       redisClient,
+        typingUsers: make(map[string]map[string]time.Time),
+    }
 }
 
 func (h *WebSocketHandler) HandleWebSocket(c *websocket.Conn) {
-	tokenString := c.Query("token")
-	if tokenString == "" {
-		tokenString = c.Headers("Authorization")
-	}
+    tokenString := c.Query("token")
+    if tokenString == "" {
+        tokenString = c.Headers("Authorization")
+    }
 
-	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
-		tokenString = tokenString[7:]
-	}
+    if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+        tokenString = tokenString[7:]
+    }
 
-	claims, err := auth.ValidateToken(tokenString)
-	if err != nil {
-		log.Printf("WebSocket auth failed: %v", err)
-		c.WriteMessage(websocket.TextMessage, []byte(`{"error": "Authentication required"}`))
-		c.Close()
-		return
-	}
+    claims, err := auth.ValidateToken(tokenString)
+    if err != nil {
+        log.Printf("WebSocket auth failed: %v", err)
+        c.WriteMessage(websocket.TextMessage, []byte(`{"error": "Authentication required"}`))
+        c.Close()
+        return
+    }
 
-	client := &WSClient{
-		UserID: claims.UserID,
-		Conn:   c,
-		Send:   make(chan []byte, 256),
-	}
+    client := &WSClient{
+        UserID: claims.UserID,
+        Conn:   c,
+        Send:   make(chan []byte, 256),
+    }
 
-	h.clients.Store(client.UserID, client)
-	defer func() {
-		h.clients.Delete(client.UserID)
-		h.broadcastOnlineStatus(client.UserID, false)
-		close(client.Send)
-	}()
+    h.clients.Store(client.UserID, client)
+    defer func() {
+        h.clients.Delete(client.UserID)
+        h.broadcastOnlineStatus(client.UserID, false)
+        close(client.Send)
+    }()
 
-	h.broadcastOnlineStatus(client.UserID, true)
+    h.broadcastOnlineStatus(client.UserID, true)
 
-	go h.writePump(client)
-	go h.subscribeToUserChats(client)
-	go h.sendUserChats(client)
+    go h.writePump(client)
+    go h.subscribeToUserChats(client)
+    go h.sendUserChats(client)
 
-	h.readPump(client)
+    h.readPump(client)
 }
 
 func (h *WebSocketHandler) readPump(client *WSClient) {
-	defer client.Conn.Close()
+    defer client.Conn.Close()
 
-	client.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	client.Conn.SetPongHandler(func(string) error {
-		client.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-		return nil
-	})
+    client.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+    client.Conn.SetPongHandler(func(string) error {
+        client.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+        return nil
+    })
 
-	for {
-		_, message, err := client.Conn.ReadMessage()
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket error: %v", err)
-			}
-			break
-		}
+    for {
+        _, message, err := client.Conn.ReadMessage()
+        if err != nil {
+            if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+                log.Printf("WebSocket error: %v", err)
+            }
+            break
+        }
 
-		var wsMsg WSMessage
-		if err := json.Unmarshal(message, &wsMsg); err != nil {
-			log.Printf("Invalid WebSocket message: %v", err)
-			continue
-		}
+        var wsMsg WSMessage
+        if err := json.Unmarshal(message, &wsMsg); err != nil {
+            log.Printf("Invalid WebSocket message: %v", err)
+            continue
+        }
 
-		wsMsg.Timestamp = time.Now().Unix()
-		h.handleIncomingMessage(client, &wsMsg)
-	}
+        wsMsg.Timestamp = time.Now().Unix()
+        h.handleIncomingMessage(client, &wsMsg)
+    }
 }
 
 func (h *WebSocketHandler) writePump(client *WSClient) {
-	ticker := time.NewTicker(54 * time.Second)
-	defer func() {
-		ticker.Stop()
-		client.Conn.Close()
-	}()
+    ticker := time.NewTicker(54 * time.Second)
+    defer func() {
+        ticker.Stop()
+        client.Conn.Close()
+    }()
 
-	for {
-		select {
-		case message, ok := <-client.Send:
-			client.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if !ok {
-				client.Conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
+    for {
+        select {
+        case message, ok := <-client.Send:
+            client.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+            if !ok {
+                client.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+                return
+            }
 
-			if err := client.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
-				return
-			}
+            if err := client.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
+                return
+            }
 
-		case <-ticker.C:
-			client.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := client.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
-		}
-	}
+        case <-ticker.C:
+            client.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+            if err := client.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+                return
+            }
+        }
+    }
 }
 
 func (h *WebSocketHandler) handleIncomingMessage(client *WSClient, msg *WSMessage) {
-	switch msg.Type {
-	case "message":
-		h.handleSendMessage(client, msg)
-	case "typing":
-		h.handleTypingIndicator(client, msg)
-	case "read":
-		h.handleReadReceipt(client, msg)
-	case "join_chat":
-		h.handleJoinChat(client, msg)
-	case "leave_chat":
-		h.handleLeaveChat(client, msg)
-	case "ping":
-		h.handlePing(client)
-	default:
-		log.Printf("Unknown message type: %s", msg.Type)
-	}
+    switch msg.Type {
+    case "message":
+        h.handleSendMessage(client, msg)
+    case "typing":
+        h.handleTypingIndicator(client, msg)
+    case "read":
+        h.handleReadReceipt(client, msg)
+    case "join_chat":
+        h.handleJoinChat(client, msg)
+    case "leave_chat":
+        h.handleLeaveChat(client, msg)
+    case "ping":
+        h.handlePing(client)
+    case "call:webrtc:offer", "call:webrtc:answer", "call:webrtc:candidate":
+        h.handleCallWebRTCMessage(client, msg)
+    case "call:hangup":
+        h.handleCallHangup(client, msg)
+    default:
+        log.Printf("Unknown message type: %s", msg.Type)
+    }
 }
 
 func (h *WebSocketHandler) handleSendMessage(client *WSClient, msg *WSMessage) {
-	uid, err := uuid.Parse(client.UserID)
-	if err != nil {
-		return
-	}
+    uid, err := uuid.Parse(client.UserID)
+    if err != nil {
+        return
+    }
 
-	chatID, err := uuid.Parse(msg.ChatID)
-	if err != nil {
-		return
-	}
+    chatID, err := uuid.Parse(msg.ChatID)
+    if err != nil {
+        return
+    }
 
-	var chatMember models.ChatMember
-	if err := h.db.Where("chat_id = ? AND user_id = ?", chatID, uid).First(&chatMember).Error; err != nil {
-		return
-	}
+    var chatMember models.ChatMember
+    if err := h.db.Where("chat_id = ? AND user_id = ?", chatID, uid).First(&chatMember).Error; err != nil {
+        return
+    }
 
-	message := models.Message{
-		SenderID:    &uid,
-		ChatID:      chatID,
-		Content:     msg.Content,
-		MessageType: models.MessageTypeText,
-	}
+    message := models.Message{
+        SenderID:    &uid,
+        ChatID:      chatID,
+        Content:     msg.Content,
+        MessageType: models.MessageTypeText,
+    }
 
-	if err := h.db.Create(&message).Error; err != nil {
-		log.Printf("Error creating message: %v", err)
-		return
-	}
+    if err := h.db.Create(&message).Error; err != nil {
+        log.Printf("Error creating message: %v", err)
+        return
+    }
 
-	h.db.Preload("Sender").First(&message, message.ID)
+    h.db.Preload("Sender").First(&message, message.ID)
 
-	messageJSON, err := json.Marshal(map[string]interface{}{
-		"type":    "new_message",
-		"message": message.ToResponse(),
-	})
-	if err != nil {
-		return
-	}
+    messageJSON, err := json.Marshal(map[string]interface{}{
+        "type":    "new_message",
+        "message": message.ToResponse(),
+    })
+    if err != nil {
+        return
+    }
 
-	channelName := "chat:" + chatID.String()
-	h.redis.Publish(context.Background(), channelName, messageJSON)
+    channelName := "chat:" + chatID.String()
+    h.redis.Publish(context.Background(), channelName, messageJSON)
 
-	h.clearTypingIndicator(chatID.String(), client.UserID)
+    h.clearTypingIndicator(chatID.String(), client.UserID)
 }
 
 func (h *WebSocketHandler) handleTypingIndicator(client *WSClient, msg *WSMessage) {
-	chatID := msg.ChatID
-	if chatID == "" {
-		return
-	}
+    chatID := msg.ChatID
+    if chatID == "" {
+        return
+    }
 
-	h.typingMu.Lock()
-	if h.typingUsers[chatID] == nil {
-		h.typingUsers[chatID] = make(map[string]time.Time)
-	}
-	h.typingUsers[chatID][client.UserID] = time.Now()
-	h.typingMu.Unlock()
+    h.typingMu.Lock()
+    if h.typingUsers[chatID] == nil {
+        h.typingUsers[chatID] = make(map[string]time.Time)
+    }
+    h.typingUsers[chatID][client.UserID] = time.Now()
+    h.typingMu.Unlock()
 
-	typingMsg, _ := json.Marshal(TypingEvent{
-		Type:      "typing",
-		ChatID:    chatID,
-		UserID:    client.UserID,
-		IsTyping:  true,
-		Timestamp: time.Now().Unix(),
-	})
+    typingMsg, _ := json.Marshal(TypingEvent{
+        Type:      "typing",
+        ChatID:    chatID,
+        UserID:    client.UserID,
+        IsTyping:  true,
+        Timestamp: time.Now().Unix(),
+    })
 
-	channelName := "chat:" + chatID
-	h.redis.Publish(context.Background(), channelName, typingMsg)
+    channelName := "chat:" + chatID
+    h.redis.Publish(context.Background(), channelName, typingMsg)
 
-	time.AfterFunc(3*time.Second, func() {
-		h.clearTypingIndicator(chatID, client.UserID)
-	})
+    time.AfterFunc(3*time.Second, func() {
+        h.clearTypingIndicator(chatID, client.UserID)
+    })
 }
 
 func (h *WebSocketHandler) clearTypingIndicator(chatID, userID string) {
-	h.typingMu.Lock()
-	if users, ok := h.typingUsers[chatID]; ok {
-		if lastTime, exists := users[userID]; exists {
-			if time.Since(lastTime) >= 3*time.Second {
-				delete(users, userID)
-				h.typingMu.Unlock()
+    h.typingMu.Lock()
+    if users, ok := h.typingUsers[chatID]; ok {
+        if lastTime, exists := users[userID]; exists {
+            if time.Since(lastTime) >= 3*time.Second {
+                delete(users, userID)
+                h.typingMu.Unlock()
 
-				typingMsg, _ := json.Marshal(TypingEvent{
-					Type:      "typing",
-					ChatID:    chatID,
-					UserID:    userID,
-					IsTyping:  false,
-					Timestamp: time.Now().Unix(),
-				})
+                typingMsg, _ := json.Marshal(TypingEvent{
+                    Type:      "typing",
+                    ChatID:    chatID,
+                    UserID:    userID,
+                    IsTyping:  false,
+                    Timestamp: time.Now().Unix(),
+                })
 
-				channelName := "chat:" + chatID
-				h.redis.Publish(context.Background(), channelName, typingMsg)
-				return
-			}
-		}
-	}
-	h.typingMu.Unlock()
+                channelName := "chat:" + chatID
+                h.redis.Publish(context.Background(), channelName, typingMsg)
+                return
+            }
+        }
+    }
+    h.typingMu.Unlock()
 }
 
 func (h *WebSocketHandler) handleReadReceipt(client *WSClient, msg *WSMessage) {
-	chatID := msg.ChatID
-	if chatID == "" {
-		return
-	}
+    chatID := msg.ChatID
+    if chatID == "" {
+        return
+    }
 
-	uid, err := uuid.Parse(client.UserID)
-	if err != nil {
-		return
-	}
+    uid, err := uuid.Parse(client.UserID)
+    if err != nil {
+        return
+    }
 
-	cid, err := uuid.Parse(chatID)
-	if err != nil {
-		return
-	}
+    cid, err := uuid.Parse(chatID)
+    if err != nil {
+        return
+    }
 
-	now := time.Now()
-	h.db.Model(&models.ChatMember{}).
-		Where("chat_id = ? AND user_id = ?", cid, uid).
-		Update("last_read_at", now)
+    now := time.Now()
+    h.db.Model(&models.ChatMember{}).
+        Where("chat_id = ? AND user_id = ?", cid, uid).
+        Update("last_read_at", now)
 
-	var unreadCount int64
-	h.db.Model(&models.Message{}).
-		Where("chat_id = ? AND sender_id != ? AND created_at > ?", cid, uid, now).
-		Count(&unreadCount)
+    var unreadCount int64
+    h.db.Model(&models.Message{}).
+        Where("chat_id = ? AND sender_id != ? AND created_at > ?", cid, uid, now).
+        Count(&unreadCount)
 
-	var lastMessage models.Message
-	h.db.Where("chat_id = ?", cid).Order("created_at DESC").First(&lastMessage)
+    var lastMessage models.Message
+    h.db.Where("chat_id = ?", cid).Order("created_at DESC").First(&lastMessage)
 
-	var messageID *string
-	if lastMessage.ID != uuid.Nil {
-		id := lastMessage.ID.String()
-		messageID = &id
-	}
+    var messageID *string
+    if lastMessage.ID != uuid.Nil {
+        id := lastMessage.ID.String()
+        messageID = &id
+    }
 
-	readMsg, _ := json.Marshal(ReadReceiptEvent{
-		Type:        "read",
-		ChatID:      chatID,
-		UserID:      client.UserID,
-		LastReadAt:  now,
-		UnreadCount: unreadCount,
-		MessageID:   messageID,
-	})
+    readMsg, _ := json.Marshal(ReadReceiptEvent{
+        Type:        "read",
+        ChatID:      chatID,
+        UserID:      client.UserID,
+        LastReadAt:  now,
+        UnreadCount: unreadCount,
+        MessageID:   messageID,
+    })
 
-	channelName := "chat:" + chatID
-	h.redis.Publish(context.Background(), channelName, readMsg)
+    channelName := "chat:" + chatID
+    h.redis.Publish(context.Background(), channelName, readMsg)
 }
 
 func (h *WebSocketHandler) handleJoinChat(client *WSClient, msg *WSMessage) {
-	chatID := msg.ChatID
-	if chatID == "" {
-		return
-	}
+    chatID := msg.ChatID
+    if chatID == "" {
+        return
+    }
 
-	uid, err := uuid.Parse(client.UserID)
-	if err != nil {
-		return
-	}
+    uid, err := uuid.Parse(client.UserID)
+    if err != nil {
+        return
+    }
 
-	cid, err := uuid.Parse(chatID)
-	if err != nil {
-		return
-	}
+    cid, err := uuid.Parse(chatID)
+    if err != nil {
+        return
+    }
 
-	var chatMember models.ChatMember
-	if err := h.db.Where("chat_id = ? AND user_id = ?", cid, uid).First(&chatMember).Error; err != nil {
-		return
-	}
+    var chatMember models.ChatMember
+    if err := h.db.Where("chat_id = ? AND user_id = ?", cid, uid).First(&chatMember).Error; err != nil {
+        return
+    }
 
-	client.ChatRooms.Store(chatID, true)
+    client.ChatRooms.Store(chatID, true)
 
-	presenceMsg, _ := json.Marshal(ChatPresenceEvent{
-		Type:     "chat_presence",
-		ChatID:   chatID,
-		UserID:   client.UserID,
-		IsJoined: true,
-	})
+    presenceMsg, _ := json.Marshal(ChatPresenceEvent{
+        Type:     "chat_presence",
+        ChatID:   chatID,
+        UserID:   client.UserID,
+        IsJoined: true,
+    })
 
-	channelName := "chat:" + chatID
-	h.redis.Publish(context.Background(), channelName, presenceMsg)
+    channelName := "chat:" + chatID
+    h.redis.Publish(context.Background(), channelName, presenceMsg)
 }
 
 func (h *WebSocketHandler) handleLeaveChat(client *WSClient, msg *WSMessage) {
-	chatID := msg.ChatID
-	if chatID == "" {
-		return
-	}
+    chatID := msg.ChatID
+    if chatID == "" {
+        return
+    }
 
-	client.ChatRooms.Delete(chatID)
+    client.ChatRooms.Delete(chatID)
 
-	presenceMsg, _ := json.Marshal(ChatPresenceEvent{
-		Type:     "chat_presence",
-		ChatID:   chatID,
-		UserID:   client.UserID,
-		IsJoined: false,
-	})
+    presenceMsg, _ := json.Marshal(ChatPresenceEvent{
+        Type:     "chat_presence",
+        ChatID:   chatID,
+        UserID:   client.UserID,
+        IsJoined: false,
+    })
 
-	channelName := "chat:" + chatID
-	h.redis.Publish(context.Background(), channelName, presenceMsg)
+    channelName := "chat:" + chatID
+    h.redis.Publish(context.Background(), channelName, presenceMsg)
 }
 
 func (h *WebSocketHandler) handlePing(client *WSClient) {
-	pongMsg, _ := json.Marshal(map[string]interface{}{
-		"type":      "pong",
-		"timestamp": time.Now().Unix(),
-	})
-	
-	select {
-	case client.Send <- pongMsg:
-	default:
-	}
+    pongMsg, _ := json.Marshal(map[string]interface{}{
+        "type":      "pong",
+        "timestamp": time.Now().Unix(),
+    })
+    
+    select {
+    case client.Send <- pongMsg:
+    default:
+    }
 }
 
 func (h *WebSocketHandler) subscribeToUserChats(client *WSClient) {
-	uid, err := uuid.Parse(client.UserID)
-	if err != nil {
-		return
-	}
+    uid, err := uuid.Parse(client.UserID)
+    if err != nil {
+        return
+    }
 
-	var chatMembers []models.ChatMember
-	if err := h.db.Where("user_id = ?", uid).Find(&chatMembers).Error; err != nil {
-		log.Printf("Error finding user chats: %v", err)
-		return
-	}
+    var chatMembers []models.ChatMember
+    if err := h.db.Where("user_id = ?", uid).Find(&chatMembers).Error; err != nil {
+        log.Printf("Error finding user chats: %v", err)
+        return
+    }
 
-	ctx := context.Background()
-	pubsub := h.redis.Subscribe(ctx)
-	defer pubsub.Close()
+    ctx := context.Background()
+    pubsub := h.redis.Subscribe(ctx)
+    defer pubsub.Close()
 
-	channels := make([]string, len(chatMembers))
-	for i, cm := range chatMembers {
-		channels[i] = "chat:" + cm.ChatID.String()
-	}
+    channels := make([]string, len(chatMembers))
+    for i, cm := range chatMembers {
+        channels[i] = "chat:" + cm.ChatID.String()
+    }
 
-	if len(channels) > 0 {
-		if err := pubsub.Subscribe(ctx, channels...); err != nil {
-			log.Printf("Error subscribing to Redis channels: %v", err)
-			return
-		}
-	}
+    if len(channels) > 0 {
+        if err := pubsub.Subscribe(ctx, channels...); err != nil {
+            log.Printf("Error subscribing to Redis channels: %v", err)
+            return
+        }
+    }
 
-	personalChannel := "user:" + client.UserID
-	if err := pubsub.Subscribe(ctx, personalChannel); err != nil {
-		log.Printf("Error subscribing to personal channel: %v", err)
-	}
+    personalChannel := "user:" + client.UserID
+    if err := pubsub.Subscribe(ctx, personalChannel); err != nil {
+        log.Printf("Error subscribing to personal channel: %v", err)
+    }
 
-	ch := pubsub.Channel()
-	for message := range ch {
-		select {
-		case client.Send <- []byte(message.Payload):
-		default:
-			log.Printf("Client send buffer full, dropping message")
-		}
-	}
+    ch := pubsub.Channel()
+    for message := range ch {
+        select {
+        case client.Send <- []byte(message.Payload):
+        default:
+            log.Printf("Client send buffer full, dropping message")
+        }
+    }
 }
 
 func (h *WebSocketHandler) sendUserChats(client *WSClient) {
-	time.Sleep(100 * time.Millisecond)
+    time.Sleep(100 * time.Millisecond)
 
-	uid, err := uuid.Parse(client.UserID)
-	if err != nil {
-		return
-	}
+    uid, err := uuid.Parse(client.UserID)
+    if err != nil {
+        return
+    }
 
-	var chatMembers []models.ChatMember
-	if err := h.db.Where("user_id = ?", uid).Find(&chatMembers).Error; err != nil {
-		return
-	}
+    var chatMembers []models.ChatMember
+    if err := h.db.Where("user_id = ?", uid).Find(&chatMembers).Error; err != nil {
+        return
+    }
 
-	chatIDs := make([]string, len(chatMembers))
-	for i, cm := range chatMembers {
-		chatIDs[i] = cm.ChatID.String()
-	}
+    chatIDs := make([]string, len(chatMembers))
+    for i, cm := range chatMembers {
+        chatIDs[i] = cm.ChatID.String()
+    }
 
-	chatsMsg, _ := json.Marshal(map[string]interface{}{
-		"type":     "user_chats",
-		"chat_ids": chatIDs,
-	})
+    chatsMsg, _ := json.Marshal(map[string]interface{}{
+        "type":     "user_chats",
+        "chat_ids": chatIDs,
+    })
 
-	select {
-	case client.Send <- chatsMsg:
-	default:
-	}
+    select {
+    case client.Send <- chatsMsg:
+    default:
+    }
 }
 
 func (h *WebSocketHandler) broadcastOnlineStatus(userID string, isOnline bool) {
-	statusMsg, _ := json.Marshal(OnlineStatusEvent{
-		Type:      "online_status",
-		UserID:    userID,
-		IsOnline:  isOnline,
-		Timestamp: time.Now().Unix(),
-	})
+    statusMsg, _ := json.Marshal(OnlineStatusEvent{
+        Type:      "online_status",
+        UserID:    userID,
+        IsOnline:  isOnline,
+        Timestamp: time.Now().Unix(),
+    })
 
-	uid, err := uuid.Parse(userID)
-	if err != nil {
-		return
-	}
+    uid, err := uuid.Parse(userID)
+    if err != nil {
+        return
+    }
 
-	var chatMembers []models.ChatMember
-	if err := h.db.Where("user_id = ?", uid).Find(&chatMembers).Error; err != nil {
-		return
-	}
+    var chatMembers []models.ChatMember
+    if err := h.db.Where("user_id = ?", uid).Find(&chatMembers).Error; err != nil {
+        return
+    }
 
-	broadcastTo := make(map[string]bool)
-	for _, cm := range chatMembers {
-		var otherMembers []models.ChatMember
-		h.db.Where("chat_id = ? AND user_id != ?", cm.ChatID, uid).Find(&otherMembers)
-		for _, om := range otherMembers {
-			broadcastTo[om.UserID.String()] = true
-		}
-	}
+    broadcastTo := make(map[string]bool)
+    for _, cm := range chatMembers {
+        var otherMembers []models.ChatMember
+        h.db.Where("chat_id = ? AND user_id != ?", cm.ChatID, uid).Find(&otherMembers)
+        for _, om := range otherMembers {
+            broadcastTo[om.UserID.String()] = true
+        }
+    }
 
-	ctx := context.Background()
-	for otherUserID := range broadcastTo {
-		channelName := "user:" + otherUserID
-		h.redis.Publish(ctx, channelName, statusMsg)
-	}
+    ctx := context.Background()
+    for otherUserID := range broadcastTo {
+        channelName := "user:" + otherUserID
+        h.redis.Publish(ctx, channelName, statusMsg)
+    }
 }
 
 func (h *WebSocketHandler) BroadcastToChat(chatID string, message interface{}) {
-	msgJSON, err := json.Marshal(message)
-	if err != nil {
-		return
-	}
+    msgJSON, err := json.Marshal(message)
+    if err != nil {
+        return
+    }
 
-	channelName := "chat:" + chatID
-	h.redis.Publish(context.Background(), channelName, msgJSON)
+    channelName := "chat:" + chatID
+    h.redis.Publish(context.Background(), channelName, msgJSON)
+}
+
+func (h *WebSocketHandler) BroadcastToUser(userID string, message []byte) {
+    channelName := "user:" + userID
+    h.redis.Publish(context.Background(), channelName, message)
+}
+
+func (h *WebSocketHandler) handleCallWebRTCMessage(client *WSClient, msg *WSMessage) {
+    callID, ok := msg.Data.(map[string]interface{})["call_id"].(string)
+    if !ok || callID == "" {
+        return
+    }
+
+    cid, err := uuid.Parse(callID)
+    if err != nil {
+        return
+    }
+
+    var call models.Call
+    if err := h.db.First(&call, cid).Error; err != nil {
+        return
+    }
+
+    uid, _ := uuid.Parse(client.UserID)
+    if !call.CanJoin(uid) {
+        return
+    }
+
+    signalJSON, _ := json.Marshal(msg.Data)
+
+    var targetUserID string
+    if call.InitiatorID == uid {
+        targetUserID = call.RecipientID.String()
+    } else {
+        targetUserID = call.InitiatorID.String()
+    }
+
+    h.BroadcastToUser(targetUserID, signalJSON)
+
+    signalType, _ := msg.Data.(map[string]interface{})["type"].(string)
+    if signalType == "call:webrtc:offer" || signalType == "call:webrtc:answer" || signalType == "call:webrtc:candidate" {
+        signal := models.CallSignal{
+            CallID: cid,
+            Type:   signalType,
+            Data:   string(signalJSON),
+        }
+        h.db.Create(&signal)
+    }
+}
+
+func (h *WebSocketHandler) handleCallHangup(client *WSClient, msg *WSMessage) {
+    callID, ok := msg.Data.(map[string]interface{})["call_id"].(string)
+    if !ok || callID == "" {
+        return
+    }
+
+    cid, err := uuid.Parse(callID)
+    if err != nil {
+        return
+    }
+
+    var call models.Call
+    if err := h.db.First(&call, cid).Error; err != nil {
+        return
+    }
+
+    uid, _ := uuid.Parse(client.UserID)
+    if call.InitiatorID != uid && call.RecipientID != uid {
+        return
+    }
+
+    if call.Status == models.CallStatusEnded || call.Status == models.CallStatusRejected {
+        return
+    }
+
+    call.SetEnded()
+    h.db.Save(&call)
+
+    hangupJSON, _ := json.Marshal(map[string]interface{}{
+        "type":     "call:hangup",
+        "call_id":  callID,
+        "ended_by": client.UserID,
+    })
+
+    h.BroadcastToUser(call.InitiatorID.String(), hangupJSON)
+    h.BroadcastToUser(call.RecipientID.String(), hangupJSON)
 }

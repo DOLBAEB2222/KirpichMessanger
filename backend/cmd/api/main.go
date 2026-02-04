@@ -12,7 +12,7 @@ import (
     "github.com/gofiber/fiber/v3/middleware/cors"
     "github.com/gofiber/fiber/v3/middleware/logger"
     "github.com/gofiber/fiber/v3/middleware/recover"
-    "github.com/gofiber/websocket/v3"
+    "github.com/gofiber/websocket/v2"
     "github.com/joho/godotenv"
     "github.com/messenger/backend/internal/handlers"
     "github.com/messenger/backend/internal/middleware"
@@ -148,6 +148,15 @@ func main() {
     subscriptions.Get("/me", subscriptionHandler.GetMySubscription)
 
     wsHandler := handlers.NewWebSocketHandler(db, redisClient)
+
+    callHandler := handlers.NewCallHandler(db, redisClient, wsHandler)
+    calls := api.Group("/calls", auth.Protected(), lastSeenMiddleware.UpdateLastSeen())
+    calls.Post("/", callHandler.InitiateCall)
+    calls.Get("/ice-servers", callHandler.GetICEServers)
+    calls.Get("/:call_id", callHandler.GetCall)
+    calls.Patch("/:call_id", callHandler.RespondToCall)
+    calls.Delete("/:call_id", callHandler.EndCall)
+    calls.Post("/:call_id/signal", callHandler.SaveCallSignal)
     app.Use("/ws", func(c fiber.Ctx) error {
         if websocket.IsWebSocketUpgrade(c) {
             return c.Next()

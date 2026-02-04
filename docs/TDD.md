@@ -1304,6 +1304,265 @@ uploads/
 
 ---
 
-**Document Version:** 1.0.0  
+## Voice & Video Calls (Stage 4)
+
+### Call Model
+```go
+type Call struct {
+    ID          uuid.UUID  // Call unique identifier
+    ChatID      uuid.UUID  // Associated DM chat
+    InitiatorID uuid.UUID  // Caller
+    RecipientID uuid.UUID  // Callee
+    Type        CallType   // "voice" or "video"
+    Status      CallStatus // "ringing", "accepted", "rejected", "missed", "ended"
+    Duration    int64      // Call duration in seconds
+    StartedAt   *time.Time // When call was accepted
+    EndedAt     *time.Time // When call ended
+    CreatedAt   time.Time
+}
+```
+
+### Call Flow
+
+#### 1. Call Initiation (REST)
+```
+POST /api/v1/calls
+Authorization: Bearer <token>
+{
+  "chat_id": "uuid",
+  "recipient_id": "uuid",
+  "call_type": "voice" | "video"
+}
+```
+
+#### 2. Call Notification (WebSocket)
+Server sends `call:initiate` event to recipient:
+```json
+{
+  "type": "call:initiate",
+  "call": {
+    "id": "call-uuid",
+    "chat_id": "chat-uuid",
+    "initiator_id": "caller-uuid",
+    "recipient_id": "recipient-uuid",
+    "type": "voice",
+    "status": "ringing"
+  },
+  "initiator": {
+    "id": "caller-uuid",
+    "username": "caller_name"
+  }
+}
+```
+
+#### 3. Call Response (REST)
+Recipient accepts or rejects:
+```
+PATCH /api/v1/calls/:call_id
+{
+  "accept": true | false
+}
+```
+
+#### 4. Response Notification (WebSocket)
+Server sends result to caller:
+```json
+{
+  "type": "call:accepted", // or "call:rejected"
+  "call": {
+    "id": "call-uuid",
+    "status": "accepted",
+    "started_at": "2024-02-04T10:00:05Z"
+  }
+}
+```
+
+### WebRTC Signaling Flow
+
+After call acceptance, peers exchange WebRTC signaling data:
+
+```
+┌──────────────┐                           ┌──────────────┐
+│   Caller     │                           │   Callee     │
+└──────┬───────┘                           └──────┬───────┘
+       │                                          │
+       │  1. Create Offer                          │
+       │─────────────────────────────────────────►│
+       │     call:webrtc:offer                      │
+       │                                          │
+       │                    2. Create Answer      │
+       │◄─────────────────────────────────────────│
+       │                      call:webrtc:answer  │
+       │                                          │
+       │  3. Exchange ICE Candidates              │
+       │◄────────────────────────────────────────►│
+       │         call:webrtc:candidate            │
+       │                                          │
+       │  4. P2P Connection Established           │
+       │◄════════════════════════════════════════►│
+       │            (Media flowing)               │
+       │                                          │
+       │  5. Hangup                               │
+       │◄────────────────────────────────────────►│
+       │              call:hangup                 │
+```
+
+#### Offer Message
+```json
+{
+  "type": "call:webrtc:offer",
+  "data": {
+    "call_id": "call-uuid",
+    "offer": {
+      "type": "offer",
+      "sdp": "v=0\r\no=- 12345..."
+    }
+  }
+}
+```
+
+#### Answer Message
+```json
+{
+  "type": "call:webrtc:answer",
+  "data": {
+    "call_id": "call-uuid",
+    "answer": {
+      "type": "answer",
+      "sdp": "v=0\r\no=- 67890..."
+    }
+  }
+}
+```
+
+#### ICE Candidate Message
+```json
+{
+  "type": "call:webrtc:candidate",
+  "data": {
+    "call_id": "call-uuid",
+    "candidate": {
+      "candidate": "candidate:1 1 UDP 2130706431...",
+      "sdpMid": "0",
+      "sdpMLineIndex": 0
+    }
+  }
+}
+```
+
+### ICE Servers Configuration
+
+Get TURN/STUN server config:
+```
+GET /api/v1/calls/ice-servers
+Authorization: Bearer <token>
+
+Response:
+{
+  "iceServers": [
+    {
+      "urls": ["turn:turn.example.com:3478?transport=udp"],
+      "username": "user",
+      "credential": "password"
+    },
+    {
+      "urls": ["stun:stun.example.com:3478"]
+    },
+    {
+      "urls": ["stun:stun.l.google.com:19302"]
+    }
+  ]
+}
+```
+
+### Call Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/v1/calls | Initiate a call |
+| GET | /api/v1/calls/:call_id | Get call details |
+| PATCH | /api/v1/calls/:call_id | Accept/reject call |
+| DELETE | /api/v1/calls/:call_id | End active call |
+| GET | /api/v1/calls/ice-servers | Get ICE server config |
+| POST | /api/v1/calls/:call_id/signal | Save call signal (server-side) |
+
+### Database Schema
+
+#### calls table
+```sql
+- id: UUID PRIMARY KEY
+- chat_id: UUID REFERENCES chats(id) ON DELETE CASCADE
+- initiator_id: UUID REFERENCES users(id) ON DELETE CASCADE
+- recipient_id: UUID REFERENCES users(id) ON DELETE CASCADE
+- type: VARCHAR(20) NOT NULL -- 'voice' or 'video'
+- status: VARCHAR(20) NOT NULL DEFAULT 'ringing'
+- duration: BIGINT DEFAULT 0
+- started_at: TIMESTAMP
+- ended_at: TIMESTAMP
+- created_at: TIMESTAMP DEFAULT NOW()
+- updated_at: TIMESTAMP DEFAULT NOW()
+```
+
+#### call_signals table
+```sql
+- id: UUID PRIMARY KEY
+- call_id: UUID REFERENCES calls(id) ON DELETE CASCADE
+- type: VARCHAR(20) NOT NULL -- 'offer', 'answer', 'candidate'
+- data: TEXT -- JSON signaling data
+- created_at: TIMESTAMP DEFAULT NOW()
+```
+
+### Security
+
+1. **Authentication:** All call operations require valid JWT
+2. **Authorization:** Only call participants can access call data
+3. **Media Encryption:** WebRTC uses DTLS-SRTP for media encryption
+4. **Signaling:** WebSocket messages are encrypted via WSS
+
+### Performance Considerations
+
+- **Bandwidth:** Voice ~64kbps, Video ~1-2Mbps
+- **Latency:** <150ms for good call quality
+- **Concurrent Calls:** Limited by TURN server capacity
+- **Memory:** Each WebSocket connection uses ~4KB buffers
+
+---
+
+## Media Storage Architecture
+
+### Directory Structure
+```
+uploads/
+├── 2026/
+│   ├── 01/
+│   │   ├── 15/
+│   │   │   ├── a1b2c3d4.webp        # Compressed image
+│   │   │   ├── a1b2c3d4_thumb.webp  # Thumbnail
+│   │   │   ├── video.mp4            # Video file
+│   │   │   └── document.pdf         # Document
+```
+
+### File Naming Convention
+- Base name: UUID (8 chars) for security and uniqueness
+- Extension: Based on MIME type
+- Thumbnails: `{base_name}_thumb.webp`
+
+### Signed URLs
+- HMAC signature with timestamp
+- 24-hour TTL via Redis
+- Prevents unauthorized direct access
+
+### Compression Pipeline
+1. **Upload:** Client uploads file
+2. **Validation:** Check MIME, size, extension
+3. **Processing:** 
+   - Images: Resize to max 500px, convert to WebP
+   - Thumbnails: 200px for image previews
+4. **Storage:** Save to date-organized directory
+5. **Database:** Store metadata in media_files table
+
+---
+
+**Document Version:** 1.1.0  
 **Last Updated:** 2024-02-04  
-**Next Review:** After Stage 3 completion
+**Next Review:** After Stage 4 completion
