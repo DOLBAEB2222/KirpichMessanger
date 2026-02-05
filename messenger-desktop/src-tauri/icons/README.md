@@ -1,1 +1,0 @@
-Replace these placeholder files with production-ready icons (png/icns/ico) before releasing.
